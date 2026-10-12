@@ -139,6 +139,8 @@ import { boardPreference, switchableBox, bandFor, fieldRows, boardArea, viewKind
 import { renderInfo, FORCED_EXIT, showsDeathFx } from './app/info.js';
 import { resolveAssets, makeData, withTimeout, QUALITY_RES, BOARD_RES, releaseGl } from './app/host.js';
 import { t } from '../../../shared/i18n.js';
+// 换装 (干员皮肤): this browser's own outfit choices — the prep view of a piece carries no skin from the server
+import { skinFor } from '../ui/skins.js';
 
 export { ensurePixi } from './app/pixi.js';
 export { PEN_CAMERA_MS, LEADER_HIT_STYLE, DRAG_HOLD_TILES } from './app/tune.js';
@@ -677,9 +679,15 @@ export async function createFieldView(host, options = {}) {
     const pick = chess && chess.isDiy ? diyPicks[chess.baseId || chess.chessId] : null;
     const dr = pick ? data.diy(piece.id, pick) : null;
     const rec = si || dr || chess;
+    // 换装 (干员皮肤): the piece's own choice from the server view, else this browser's selection for the base chess /
+    // the piece / the 自选 slot's operator (the owner's own board is built from m.private, which carries no skin,
+    // so without this the player would not see their own outfit)
+    const skin = piece.skin ?? skinFor(chess?.baseId || piece.id) ?? skinFor(piece.id) ?? (pick ? skinFor(pick.charId) : null) ?? null;
+    if (globalThis.__SP_DEBUG_SKINS__) console.info('[skins] 备战棋子', piece.id, '→ skin', skin, '(服务端视图', piece.skin, '| 本地', skinFor(chess?.baseId || piece.id), ')');
     return {
       kind: 'op', side: 'ally', defId: piece.id,
       spine: rec?.assets?.spine || rec?.charId || null, avatar: rec?.assets?.avatar || rec?.charId || null,
+      skin,
       tier: chess?.tier || piece.tier || 1, golden: !!(piece.golden || chess?.isGolden), dir,
       ...(si ? { standInFor: si.standInFor } : null),
       ...(dr ? { diy: { charId: pick.charId, skillIndex: pick.skillIndex ?? null, uniEquipId: pick.uniEquipId ?? null } } : null),
@@ -760,7 +768,7 @@ export async function createFieldView(host, options = {}) {
       e.key = key;
       const info = pieceInfo(e.piece, e.area);
       // (the model is part of it: a piece whose body changes — a merge, an own 补位 / 自选 setting arriving — is rebuilt)
-      const sig = `${info.kind}|${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}`;
+      const sig = `${info.kind}|${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}|${info.skin || ''}`;
       let v = views.get(key);
       if (v && v._sig !== sig) { dropView(key); v = null; }
       const w = slotWorld(e);
@@ -827,10 +835,10 @@ export async function createFieldView(host, options = {}) {
   function syncReadOnlyPrepUnits(units) {
     const keep = new Set();
     for (const u of units) {
-      const info = u && Number.isInteger(u.uid) ? renderInfo({ ...u, id: `m:${u.uid}` }) : null;
+      const info = u && Number.isInteger(u.uid) ? liveInfo({ ...u, id: `m:${u.uid}` }) : null;
       if (!info) continue;
       keep.add(info.id);
-      const sig = `${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}|${info.x},${info.y}|${info.dir || ''}|${(info.items || []).join(',')}`;
+      const sig = `${info.defId}|${info.golden ? 1 : 0}|${info.spine || ''}|${info.skin || ''}|${info.x},${info.y}|${info.dir || ''}|${(info.items || []).join(',')}`;
       let v = views.get(info.id);
       if (v && v._sig !== sig) { dropView(info.id); v = null; }
       if (v) continue;
@@ -1331,6 +1339,18 @@ export async function createFieldView(host, options = {}) {
     return info;
   }
 
+  /**
+   * A live unit of a battle on screen (UnitInfo) with this browser's 换装 choice filled in — a piece already deployed
+   * when the player picks an outfit would otherwise keep its own model until it floats off and comes back.
+   */
+  function liveInfo(u) {
+    const info = addInfo(u);
+    if (!info || info.kind !== 'op' || info.side !== 'ally' || info.skin) return info;
+    const skin = skinFor(info.defId);
+    if (!skin) return info;
+    return { ...info, skin };
+  }
+
   // a hand item on a scouted prep board (UnitInfo kind 'item'): the plate's icon and colour resolve client-side,
   // exactly like the own prep bench (pieceInfo)
   function scoutItemInfo(info) {
@@ -1379,7 +1399,7 @@ export async function createFieldView(host, options = {}) {
     // for a snapshot unit nobody announced is rebuilt with the real info
     for (const e of list) {
       if (!Array.isArray(e) || e[0] !== 'spawn') continue;
-      const info = addInfo(e[1]);
+      const info = liveInfo(e[1]);
       if (info && views.get(info.id)?._unknown) dropView(info.id);
     }
     return interp.pushEvents(list, performance.now() / 1000, t);
@@ -1414,7 +1434,7 @@ export async function createFieldView(host, options = {}) {
   function handleEvent(e, now) {
     switch (e[0]) {
       case 'spawn': {
-        const info = addInfo(e[1]);
+        const info = liveInfo(e[1]);
         if (!info) break;
         gone.delete(info.id);
         const v = battleView(info.id);

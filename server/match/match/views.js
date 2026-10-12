@@ -113,7 +113,9 @@ export class MatchViews {
         fieldId: this.fieldOf(ps),
         status: this.statusOf(ps),
         autoplay: ps.autoplay,
-        // the LP this round's own battle will cost at settlement so far (COMBAT / 联防 only, omitted when 0)
+        // 干员皮肤 (换装, docs/SKINS.md): the outfits this player picked — PUBLIC, so a teammate's board draws them.
+        // Omitted when empty, which keeps the payload of a match without skins byte-identical to before.
+        ...(Object.keys(ps.skins).length ? { skins: ps.skins } : {}),        // the LP this round's own battle will cost at settlement so far (COMBAT / 联防 only, omitted when 0)
         ...this._pendingLpView(ps),
       })),
       fields: this.fields.map((f) => {

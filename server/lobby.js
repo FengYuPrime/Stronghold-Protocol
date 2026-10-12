@@ -167,6 +167,28 @@ function freezeDiy(picks) {
   return Object.freeze(out);
 }
 
+/**
+ * Frozen copy of a 干员皮肤 selection (换装), keeping only entries that can mean something: a visible normal chess
+ * (the same gate as a loadout entry: no elite record, nothing hidden, no promoted base id) or a 自选 / DIY operator,
+ * whose pieces carry either a `char_*` id or a `chess_char_*_diy*` slot id. An unknown skinId is NOT dropped here —
+ * the catalogue lives in data/skins.json and the assets manifest decides whether it can be drawn
+ * (public/js/assets.js spineEntry falls back to the operator's own model), so a newer client may pick a skin this
+ * server cannot draw without the choice being thrown away.
+ * @param {Record<string, string>} skins `{ [chessId]: skinId }`
+ * @param {(id: string) => any} getChess
+ */
+function freezeSkins(skins, getChess) {
+  const out = {};
+  for (const [id, skinId] of Object.entries(skins || {})) {
+    if (typeof skinId !== 'string' || !skinId) continue;
+    if (id.startsWith('char_') || (id.startsWith('chess_char_') && id.includes('_diy'))) { out[id] = skinId; continue; }
+    const rec = getChess(id);
+    if (!rec || rec.isGolden || rec.visible === false || rec.isHidden || (rec.baseId && rec.baseId !== id)) continue;
+    out[id] = skinId;
+  }
+  return Object.freeze(out);
+}
+
 /** One room: 4 seat slots, host, difficulty, optional running match. */
 export class Room {
   /** @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now */
@@ -348,6 +370,7 @@ export class Lobby {
       case 'room.loadout': return this.loadout(session, msg);
       case 'room.ownership': return this.ownership(session, msg);
       case 'room.diy': return this.diy(session, msg);
+      case 'room.skins': return this.skins(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
       case 'room.removeSpectator': return this.removeSpectator(session, msg);
       default:
@@ -668,6 +691,39 @@ export class Lobby {
   }
 
   /**
+   * room.skins (干员皮肤 / 换装, docs/SKINS.md): store the player's chosen outfits on the session and the seat, and
+   * hand them to a running match. No phase gate, unlike the loadout: a skin is cosmetic and public (a teammate sees
+   * the same model on the board), so it may be changed at any time and applies from the next battle.
+   */
+  skins(session, { skins }) {
+    const data = this.safeData();
+    const cleaned = freezeSkins(skins, (id) => lookup('chess', id, data));
+    // 现场排查（换装不生效时）：设 SP_DEBUG_SKINS=1 起服即可看到服务端这一侧的收与发
+    if (process.env.SP_DEBUG_SKINS) {
+      this.log.info(`[skins] room.skins ← ${session.playerId}: 收到 ${Object.keys(skins || {}).length} 条，保留 ${Object.keys(cleaned).length} 条`, JSON.stringify(cleaned));
+    }
+    session.skins = cleaned;
+    const room = this.roomOf(session);
+    if (!room) return OK;
+    const seat = room.seatOf(session.playerId);
+    if (seat) seat.skins = cleaned;
+    if (!room.match) return OK;
+    if (typeof room.match.setSkins !== 'function') return fail(ERR.ROOM_STARTED, 'stored for the next match');
+    let r;
+    try {
+      r = room.match.setSkins(session.playerId, cleaned);
+    } catch (e) {
+      this.log.error(`[lobby] ${room.code} match.setSkins threw`, e);
+      return fail(ERR.INTERNAL);
+    }
+    if (r && typeof r === 'object' && r.error) {
+      return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
+    }
+    if (process.env.SP_DEBUG_SKINS) this.log.info(`[skins] room.skins → 已交给正在进行的对局（${session.playerId}）`);
+    return OK;
+  }
+
+  /**
    * room.ownership (0.2.0 补位): keep the droppable chess of the not-owned list, store it on the session and the seat
    * (see the header). A running match never takes it: it keeps the list its seat had at its start.
    */
@@ -725,6 +781,8 @@ export class Lobby {
       notOwned: s.isBot ? null : s.notOwned || null,
       // 0.2.0 自选编队: the human's checked DIY picks (bots field no 自选 piece [ASSUMED])
       diy: s.isBot ? null : s.diy || null,
+      // 干员皮肤 (换装): the human's chosen outfits (bots always wear the default model)
+      skins: s.isBot ? null : s.skins || null,
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
     const ctx = { live: true, ended: false, disposed: false, match: null, lastPublic: null, sharedResult: null, results: new Map() };
@@ -738,6 +796,8 @@ export class Lobby {
         modeId: modeIdFor(room.mode, room.difficulty),
         // 「AI 队友最后选择」 (GitHub #338): fixed for the match
         aiPicksLast: room.mode !== 'solo' && room.aiPicksLast === true,
+        // 调试 (SP_DEV=1): the dev-only「+999 资金」intent (g.devGold) and its button; false in a normal boot
+        devGold: !!this.opts.devGold,
         seats,
         // the spectator seats (header): watched like eliminated players, never players
         spectators: room.spectators.map((s) => s.playerId),
@@ -988,6 +1048,7 @@ export class Lobby {
       ops: session.ops || null,
       notOwned: session.notOwned || null,
       diy: session.diy || null,
+      skins: session.skins || null,
     };
   }
 

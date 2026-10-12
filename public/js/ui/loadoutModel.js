@@ -13,7 +13,7 @@
 // 精英2 Lv.60) are kept; stored beside the entries (`sp.pref.loadout` = { v: 1, entries, ops }; an older stored loadout
 // has none = the defaults) and sent with `room.loadout { entries, ops }` (shared/protocol.js checkLoadoutOps).
 
-import { loadoutOptions, checkLoadout, checkLoadoutOps, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS } from '../../../shared/protocol.js';
+import { loadoutOptions, checkLoadout, checkLoadoutOps, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS, isSkinSelection } from '../../../shared/protocol.js';
 import { isPotential, isCultivate, POTENTIAL_DEFAULT, CULTIVATE_DEFAULT } from '../../../shared/potential.js';
 import { t, N_ } from '../../../shared/i18n.js';
 
@@ -166,13 +166,17 @@ export const LOADOUT_IMPORT_MAX_BYTES = 256 * 1024;
  * Portable payload of a loadout, as downloaded / copied by 导出 — with the per-operator 潜能 / 练度 (`ops`, 0.2.2; an
  * older build reading it ignores the field).
  * @param {Record<string, any>} entries `room.loadout.entries`
- * @param {{ now?: number, ops?: Record<string, any> }} [o]
+ * @param {{ now?: number, ops?: Record<string, any>, skins?: Record<string, string> }} [o] `skins` = 换装 choices
+ *   (chessId → skinId). The field is ADDITIVE: a payload without it is exactly what older builds wrote, and a build
+ *   that does not know `skins` reads such a file as the original loadout (parseImport ignores unknown fields).
  */
-export function exportPayload(entries, { now = Date.now(), ops = {} } = {}) {
+export function exportPayload(entries, { now = Date.now(), ops = {}, skins = null } = {}) {
   const clean = {};
   for (const [id, e] of Object.entries(entries || {})) if (isObj(e)) clean[id] = { ...e };
   const cleanOps = {};
   for (const [id, e] of Object.entries(ops || {})) if (isObj(e)) cleanOps[id] = { ...e };
+  const cleanSkins = {};
+  for (const [id, skinId] of Object.entries(skins || {})) if (typeof skinId === 'string' && skinId) cleanSkins[id] = skinId;
   return {
     kind: LOADOUT_EXPORT_KIND,
     v: LOADOUT_VERSION,
@@ -180,6 +184,9 @@ export function exportPayload(entries, { now = Date.now(), ops = {} } = {}) {
     count: Object.keys(clean).length,
     entries: clean,
     ops: cleanOps,
+    // 换装 (0.2.5): only present when the player actually has skins picked, so an export without any is byte-identical
+    // to what 0.2.4 wrote
+    ...(Object.keys(cleanSkins).length ? { skins: cleanSkins } : {}),
   };
 }
 
@@ -214,8 +221,12 @@ export function parseImport(input) {
   if (kind && kind !== LOADOUT_EXPORT_KIND) return { ok: false, error: t('这不是干员调配的数据') };
   const entries = parseStored(raw);
   const ops = isObj(raw.ops) ? parseStoredOps(raw) : null;
-  if (!Object.keys(entries).length && !(ops && Object.keys(ops).length)) return { ok: false, error: t('里面没有有效的调配条目') };
-  return ops ? { ok: true, entries, ops } : { ok: true, entries };
+  // 换装 (0.2.5): `skins` 是可选的新字段——没有它时（0.2.4 及更早导出的文件）行为完全不变
+  const skins = isSkinSelection(raw.skins) ? { ...raw.skins } : null;
+  if (!Object.keys(entries).length && !(ops && Object.keys(ops).length) && !(skins && Object.keys(skins).length)) {
+    return { ok: false, error: t('里面没有有效的调配条目') };
+  }
+  return { ok: true, entries, ...(ops ? { ops } : null), ...(skins ? { skins } : null) };
 }
 
 // ---- options & choices ---------------------------------------------------------------------------------------------

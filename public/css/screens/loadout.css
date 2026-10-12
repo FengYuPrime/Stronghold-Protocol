@@ -650,3 +650,123 @@
 }
 
 .diy-choice__tags { display: flex; flex-wrap: wrap; gap: .08rem; color: var(--text-lo); font-size: max(calc(.12 * var(--t)), 10px); }
+
+/* ---- 换装 / 皮肤选择 (干员皮肤, ui/skinPicker.js) ------------------------------------------------------------
+   单行垂直列表：每款皮肤独占一行，左侧头像、中间名称与系列、右侧状态标签，与 .lo-mods 同一套观感。 */
+.lo-skins {
+  display: flex;
+  flex-direction: column;
+  gap: max(.08rem, 6px);
+  width: 100%;
+}
+.lo-skin {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: max(.12rem, 8px);
+  padding: max(.06rem, 5px) max(.12rem, 10px) max(.06rem, 5px) max(.06rem, 5px);
+  font: inherit;
+  color: var(--text-lo);
+  text-align: left;
+  cursor: pointer;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid var(--line);
+  border-left: 3px solid transparent;
+  border-radius: 2px;
+  transition: background var(--t-fast), border-color var(--t-fast);
+  touch-action: manipulation;
+}
+.lo-skin:hover:not(:disabled) {
+  border-color: var(--line-3);
+  background: rgba(255, 255, 255, .06);
+}
+.lo-skin.is-on {
+  color: var(--text-hi);
+  background: linear-gradient(90deg, rgba(78, 216, 175, .16), rgba(78, 216, 175, .03) 80%);
+  border-color: rgba(78, 216, 175, .75);
+}
+.lo-skin:disabled {
+  cursor: default;
+  opacity: .45;
+}
+/* 模型未下载：仍然可选（选中会回退到干员自己的模型），只是压低对比度并给一个「未安装」标签 */
+.lo-skin.is-absent .lo-skin__art { opacity: .55; }
+.lo-skin.is-absent:hover { border-color: var(--line-3); }
+.lo-skin__art {
+  flex: 0 0 auto;
+  width: max(.48rem, 36px);
+  height: max(.48rem, 36px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .4);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.lo-skin__art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+}
+/* 素材没导入的皮肤：拿干员默认头像打底，压暗表示不是它自己的立绘 */
+.lo-skin__art img.is-dim { opacity: .45; filter: grayscale(.4); }
+.lo-skin__art--none {
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(45deg, rgba(255, 255, 255, .06) 0 3px, transparent 3px 7px);
+}
+.lo-skin__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: max(.02rem, 1px);
+}
+.lo-skin__name {
+  font-size: max(.17rem, 12px);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-hi);
+}
+.lo-skin__group {
+  font-family: var(--font-num);
+  font-size: max(.12rem, 9px);
+  letter-spacing: .06em;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lo-skin__badge {
+  flex: 0 0 auto;
+  font-size: max(.12rem, 9px);
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: max(.02rem, 2px) max(.06rem, 5px);
+  border-radius: 2px;
+  background: rgba(78, 216, 175, .15);
+  color: var(--mint-400);
+  border: 1px solid rgba(78, 216, 175, .4);
+}
+.lo-skin__badge--absent {
+  background: rgba(255, 255, 255, .06);
+  color: var(--text-dim);
+  border-color: var(--line);
+}
+.lo-skin__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: max(.06rem, 4px);
+  margin: max(.08rem, 6px) 0 0;
+  font-size: max(.12rem, 10px);
+  line-height: 1.5;
+  color: var(--text-lo);
+}
+.lo-skin__hint .icon { flex: none; width: max(.18rem, 12px); height: max(.18rem, 12px); margin-top: .02rem; }

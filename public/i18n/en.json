@@ -271,6 +271,15 @@
   "普通干员没有模组，所选模组在「精锐」中生效；": "Normal Operators have no Module; the chosen Module applies to the [Elite]; ",
   "没有符合条件的干员": "No Operators match the filters",
   "恢复默认": "Reset to Default",
+  "换装": "Outfits",
+  "正在载入皮肤目录…": "Loading the outfit catalogue…",
+  "{n} 套可选": "{n} outfits",
+  "{n} 套可选 · 已安装 {k}": "{n} outfits · {k} installed",
+  "选择皮肤": "Choose an outfit",
+  "已装配": "Equipped",
+  "未安装": "Not installed",
+  "模型未下载的皮肤选中后仍显示干员默认模型；补齐素材需要运行 node tools/fetch-assets.mjs（或从完整包复制 public/assets）": "An outfit whose model is not downloaded still shows the operator's default model; run node tools/fetch-assets.mjs (or copy public/assets from the full package) to fetch the rest",
+  "换装是局外设置，对队友可见；修改在下一次战斗生效": "Outfits are an out-of-match setting, visible to teammates; a change applies to the next battle",
   "技能": "Skill",
   "技能等级": "Skill Level",
   "选择技能": "Choose Skill",
@@ -1212,5 +1221,10 @@
   "{names}只能部署在召唤者相邻四格，已退回整备区": "{names} can only be deployed on the four tiles adjacent to the summoner and returned to the Bench",
   "{names}只能部署在召唤者相邻四格，整备区已满，下回合返还": "{names} can only be deployed on the four tiles adjacent to the summoner; the Bench is full, so they come back next round",
   "装备库存不足，未获得该装备": "Equipment stock is insufficient; no equipment was received",
-  "库存不足": "Out of stock"
+  "库存不足": "Out of stock",
+  "+999 资金": "+999 funds",
+  "开发调试：+999 资金": "Developer debug: +999 funds",
+  "调试：+999 资金": "Debug: +999 funds",
+  "调试失败：{code}": "Debug failed: {code}",
+  "已导入 {applied} 名干员的调配与 {n} 套皮肤": "Imported the loadout of {applied} operators and {n} outfits"
 }

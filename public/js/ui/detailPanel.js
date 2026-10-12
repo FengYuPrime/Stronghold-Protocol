@@ -39,6 +39,8 @@ import { html, Icon, TierChip, MicroLabel, Button, confirmDialog, useTicker } fr
 import { Img, RichText, UnitThumb, BondGlyph, GIcon, diyToken } from './gameComponents.js';
 import { attackInterval, rangeGridBox, fmtNum, tileKey, chessLoadout, nextThreshold, bondTier, briefingBondTip, pieceBondIds, grantedBonds, morphPairings, ownStandIn, standInOf, standInLoadout, standInLabel, standInTip, standInForText, ownDiyRecord, ownDiyPick, diyRecordFor, pickGetter, unitPick, unitCultivation } from './gameLogic.js';
 import { chessPortraitUrl, skillIconUrl, skillRecordIconUrl, profIconUrl, subProfIconUrl, itemIconUrl, enemyIconUrl, tokenAvatarUrl, factionIconUrl, uiUrl, moduleTypeIconUrl } from './assetUrls.js';
+// 换装: 详情页大图也用所选皮肤的半身像（与商店卡片同一套解析；没有该皮肤素材时 chessPortraitUrl 自己回退）
+import { skinFor } from './skins.js';
 import { abilityRows } from './abilityLines.js';
 import { data } from '../data.js';
 import { attackRangeGrid } from '../../../shared/loadoutRecord.js';
@@ -416,11 +418,13 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const bondIds = pieceBondIds(c, carried, getItem);
   const grantedIds = bondIds.filter((b) => !(Array.isArray(c.bonds) && c.bonds.includes(b)));
   const sell = c.sellPrice ?? 1;
+  // 换装: 这张卡画的是哪套皮肤——棋子自己的选择优先，自选编队 / 补位则按那名干员查
+  const skinId = skinFor(c.chessId) || (diy ? skinFor(c.charId) : null) || (si ? skinFor(si.charId) : null);
   const blocks = {};
   blocks.head = html`
     <div key="head" class="dhead">
       <div class=${cx('dhead__art', golden && 'is-golden', `dhead__art--t${c.tier}`)}>
-        <${Img} src=${chessPortraitUrl(m, body)} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${si} />`} />
+        <${Img} src=${chessPortraitUrl(m, body, skinId)} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" rec=${si} />`} />
       </div>
       <div class="dhead__info">
         <div class="dhead__chips">

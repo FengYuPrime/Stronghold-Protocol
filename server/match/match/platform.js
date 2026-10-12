@@ -77,6 +77,25 @@ export class MatchPlatform {
     return res;
   }
 
+  /**
+   * room.skins during the match (干员皮肤 / 换装, docs/SKINS.md): replace a player's chosen outfits. No phase gate —
+   * a skin is cosmetic and public, and the pieces already on the board take the new model at their next rebuild
+   * (the client's piece signature carries the skin).
+   * @param {string} playerId
+   * @param {Record<string, string> | null} skins `{ [chessId]: skinId }`
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  setSkins(playerId, skins) {
+    const ps = this.players.get(playerId);
+    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
+    let res = OK;
+    this.guard(() => {
+      ps.setSkins(skins);
+      this.markPublic();
+    });
+    return res;
+  }
+
   onDisconnect(playerId) {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || this.disposed) return;

@@ -13,13 +13,17 @@ export function uiUrl(m, key) {
 
 /**
  * Operator avatar for a chess record (golden → E2 art when present).
+ * `skinId` (换装): the outfit's own 180×180 avatar wins when this install has it.
  * @param {any} m manifest
  * @param {any} chess chess.json record (or { assets: { avatar } })
+ * @param {string|null} [skinId]
  */
-export function chessAvatarUrl(m, chess) {
+export function chessAvatarUrl(m, chess, skinId = null) {
   const chars = obj(obj(m)?.chars);
   const id = str(chess?.assets?.avatar) || str(chess?.charId);
   if (!chars || !id) return null;
+  const skin = skinOf(m, chess, skinId);
+  if (skin && str(skin.avatar)) return str(skin.avatar);
   if (id.endsWith('_2') && !chars[id]) {
     const base = chars[id.slice(0, -2)];
     return str(base?.avatarE2) || str(base?.avatar);
@@ -28,14 +32,45 @@ export function chessAvatarUrl(m, chess) {
 }
 
 /**
+ * The manifest entry of a chosen outfit, resolved across the two id forms: a choice is keyed by chess id
+ * (`chess_char_1_01_a`, or the operator for a 自选 slot) while `chars[charId].skins` is keyed by skin id — and the
+ * catalogue names a skin `char_x@grp#n` while the site path uses `char_x_grp_n`.
+ * @param {any} m @param {any} chess @param {string|null} skinId
+ */
+export function skinOf(m, chess, skinId = null) {
+  const want = str(skinId);
+  if (!want) return null;
+  const chars = obj(obj(m)?.chars);
+  const entry = (id) => (chars && chars[id] ? obj(obj(chars[id]).skins) : null);
+  const stems = new Set([want, want.replace(/@/g, '_').replace(/#/g, '_')]);
+  for (const id of [str(chess?.charId), str(chess?.assets?.avatar), str(chess?.assets?.portrait)]) {
+    if (!id) continue;
+    const skins = entry(id);
+    if (!skins) continue;
+    for (const key of Object.keys(skins)) {
+      if (stems.has(key) || stems.has(key.replace(/@/g, '_').replace(/#/g, '_'))) return obj(skins[key]);
+    }
+  }
+  return null;
+}
+
+/**
  * Half-body portrait (180×360) for a chess record (golden → E2 portrait when present).
+ * `skinId` (换装): the outfit's own `portrait` when the manifest has one, else its avatar (the dumps ship no skin
+ * portrait), so a shop card / team row shows the chosen outfit instead of the operator's default art.
  * @param {any} m
  * @param {any} chess
+ * @param {string|null} [skinId]
  */
-export function chessPortraitUrl(m, chess) {
+export function chessPortraitUrl(m, chess, skinId = null) {
   const chars = obj(obj(m)?.chars);
   const id = str(chess?.assets?.portrait);
   if (!chars) return null;
+  const skin = skinOf(m, chess, skinId);
+  if (skin) {
+    const art = str(skin.portrait) || str(skin.avatar);
+    if (art) return art;
+  }
   if (id) {
     if (id.endsWith('_2')) {
       const base = chars[id.slice(0, -2)];

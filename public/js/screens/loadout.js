@@ -44,6 +44,10 @@ import { setOwned, notOwnedCount, serializeOwnership, parseOwnershipImport, OWNE
 import { OwnershipPanel, useOwnershipRoster } from './ownership.js';
 import { DiyPanel, diyData } from './diy.js';
 import { LoadoutStats } from '../ui/loadoutStats.js';
+// 换装 (干员皮肤): the 换装 section of the detail — catalogue from data/skins.json, sync in ui/skins.js
+import { SkinSection } from '../ui/skinPicker.js';
+// 换装: already-chosen outfits also show on the roster card and the detail header (ui/skins.js is the shared map)
+import { skinFor, skinsStore, setSkins } from '../ui/skins.js';
 export { LoadoutStats, statsPreview } from '../ui/loadoutStats.js';
 import { diyCount, sanitizeDiyPicks, setPick, serializeDiy, parseDiyImport, DIY_IMPORT_MAX_BYTES } from '../ui/diyModel.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
@@ -207,7 +211,7 @@ export function RosterRow({ m, chess, golden, entries, ops = {}, selected, onPic
       class=${cx('lo-card', `lo-card--t${chess.tier}`, selected && 'is-sel', changed && 'is-changed', notOwned && 'is-standin')}>
     <button type="button" class="lo-card__pick" aria-pressed=${selected ? 'true' : 'false'} title=${chess.name} onClick=${() => onPick(chess.chessId)}>
       <span class="lo-card__art">
-        <${Img} src=${chessAvatarUrl(m, chess)} fallback=${html`<span class="lo-card__glyph">${[...(chess.name || '?')][0]}</span>`} />
+        <${Img} src=${chessAvatarUrl(m, chess, skinFor(chess.chessId))} fallback=${html`<span class="lo-card__glyph">${[...(chess.name || '?')][0]}</span>`} />
         <${TierChip} tier=${chess.tier} size="sm" class="lo-card__tier" />
       </span>
       <span class="lo-card__id">
@@ -320,7 +324,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
   return html`<aside class="lo-detail" aria-label=${t('{name} 调配', { name: chess.name })}>
     <div class="lo-dhead">
       <div class=${cx('lo-dhead__art', `lo-dhead__art--t${chess.tier}`)}>
-        <${Img} src=${chessPortraitUrl(m, golden || chess)} fallback=${html`<${UnitThumb} kind="chess" id=${chess.chessId} size="lg" />`} />
+        <${Img} src=${chessPortraitUrl(m, golden || chess, skinFor(chess.chessId))} fallback=${html`<${UnitThumb} kind="chess" id=${chess.chessId} size="lg" />`} />
       </div>
       <div class="lo-dhead__info">
         <div class="lo-dhead__chips"><${TierChip} tier=${chess.tier} size="md" />
@@ -340,6 +344,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
       <${OperatorVoice} charId=${chess.charId} />
       <${CultivationSection} charId=${chess.charId} ops=${ops} onSet=${onOps} standIn=${notOwned} />
       <${LoadoutGarrisons} chess=${level === 'elite' && golden ? golden : chess} m=${m} />
+      <${SkinSection} chess=${chess} />
       <section class="lo-sec">
         <header class="lo-sec__head">
           <h3>${t('技能')}<${MicroLabel}>SKILL<//></h3>
@@ -445,6 +450,31 @@ export function missingGameData(tab, status = data.status) {
  * @param {(name: string) => string} [status]
  * @returns {{ text: string, tone: 'warn'|'error' } | null}
  */
+/**
+ * 换装: merge an imported `skins` map into the current selection. Only entries this build can actually draw are kept
+ * (the skin must be in the catalogue and have files on disk), so importing on a machine without that skin's assets
+ * does not leave a dangling choice. Choices for other 棋子 stay as they are.
+ * @param {Record<string, string>} map chessId（或干员 id，用于自选编队）→ skinId
+ * @returns {number} how many choices were applied
+ */
+function mergeSkinImport(map) {
+  const m = data.get('assets');
+  const chars = (m && m.chars) || {};
+  const merged = { ...skinsStore.get().entries };
+  let n = 0;
+  for (const [key, skinId] of Object.entries(map || {})) {
+    if (typeof key !== 'string' || typeof skinId !== 'string' || !skinId) continue;
+    const rec = data.lookup('chess', key);
+    const charId = (rec && rec.charId) || (/^char_/.test(key) ? key : null);
+    const has = charId && chars[charId] && chars[charId].skins && chars[charId].skins[skinId];
+    if (!has) continue;
+    merged[key] = skinId;
+    n++;
+  }
+  if (n) setSkins(merged);
+  return n;
+}
+
 export function importRefusal(kind, ready, status = data.status) {
   if (!ready) return { text: t('干员数据仍在载入，请稍候再导入'), tone: 'warn' };
   if (missingGameData(kind, status).length) return { text: t('导入失败：游戏数据没有载入，未做任何改动。请刷新页面；仍不行时，请检查广告拦截插件和网络'), tone: 'error' };
@@ -545,7 +575,7 @@ function LoadoutScreen({ st }) {
   const openExport = () => setIo(tab === 'ownership'
     ? { mode: 'export', kind: 'ownership', text: serializeOwnership(loadoutStore.get().notOwned) }
     : tab === 'diy' ? { mode: 'export', kind: 'diy', text: serializeDiy(loadoutStore.get().diy) }
-      : { mode: 'export', kind: 'loadout', text: serializeExport(loadoutStore.get().entries, { ops: loadoutStore.get().ops }) });
+      : { mode: 'export', kind: 'loadout', text: serializeExport(loadoutStore.get().entries, { ops: loadoutStore.get().ops, skins: skinsStore.get().entries }) });
   const openImport = () => setIo({ mode: 'import', kind: tab, text: '' });
   const ioCopy = async () => {
     const ok = await copyText(ioText);
@@ -591,12 +621,15 @@ function LoadoutScreen({ st }) {
     const r = applyLoadoutEntries(res.entries, getChess, res.ops ? { ops: res.ops, isOperator: (id) => opIds.has(id) } : {});
     const { applied, dropped } = r;
     const nOps = r.ops ?? 0;
+    // 换装: 载荷里带 `skins` 就一起导入（没有这个字段的老文件行为完全不变）；只保留本 build 认识的皮肤 id
+    const nMergedSkins = res.skins ? mergeSkinImport(res.skins) : 0;
     // nothing survived sanitising (unknown chess, or every choice already the default): keep the current loadout
-    if (!applied && !nOps) { toast(t('导入失败：这份数据在当前版本没有可用的调配，未做任何改动'), 'error'); return; }
+    if (!applied && !nOps && !nMergedSkins) { toast(t('导入失败：这份数据在当前版本没有可用的调配，未做任何改动'), 'error'); return; }
     setIo(null);
-    toast(!applied ? t('已导入 {n} 名干员的潜能与练度', { n: nOps })
+    toast(!applied && !nMergedSkins ? t('已导入 {n} 名干员的潜能与练度', { n: nOps })
       : dropped ? t('已导入 {applied} 名干员（另有 {dropped} 项未导入）', { applied, dropped })
-        : t('已导入 {applied} 名干员的调配', { applied }), dropped ? 'warn' : 'success');
+        : nMergedSkins ? t('已导入 {applied} 名干员的调配与 {n} 套皮肤', { applied, n: nMergedSkins })
+          : t('已导入 {applied} 名干员的调配', { applied }), dropped ? 'warn' : 'success');
   };
 
   // Esc closes; ←/→ browse the filtered roster (not while typing in the search field)

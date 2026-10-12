@@ -11,6 +11,10 @@ import { bountyText, bountyCard } from '../choices.js';
 export class PlayerViews {
   pieceView(p, rc = null) {
     const rec = p.kind === 'item' ? this.gd.item(p.id) : p.kind === 'token' ? this.gd.token(p.id) : this.gd.chess(p.id);
+    // 换装 (干员皮肤): the outfit of this piece, omitted when there is none (an install without skins stays byte-identical)
+    const skin = p.kind === 'chess'
+      ? this.skinFor(rec, p.id, typeof this.diyPickOf === 'function' ? this.diyPickOf(p.id) : null)
+      : null;
     const v = {
       uid: p.uid,
       kind: p.kind,
@@ -20,6 +24,7 @@ export class PlayerViews {
       items: p.kind === 'chess' ? (p.items || []).map((it) => ({ uid: it.uid, id: it.id })) : [],
       count: p.kind === 'token' ? (p.count || 1) : 1,
       ownerUid: p.kind === 'token' ? p.ownerUid ?? null : null,
+      ...(skin ? { skin } : {}),
     };
     if (rc) { v.row = rc[0]; v.col = rc[1]; v.dir = pieceDir(p); }
     return v;
@@ -64,6 +69,8 @@ export class PlayerViews {
       alive: this.alive,
       lp: this.lp,
       funds: this.funds,
+      // 调试 (SP_DEV=1)：只在这时下发，界面才显示「+999 资金」按钮（server/match/player/economy.js devGold）
+      ...(this.m.devGold === true ? { dev: true } : null),
       bandId: this.bandId,
       ready: this.ready,
       canReady: this.alive && this.tempEmpty && !this.personalChoice && this.m.phase === PHASE.PREP,

@@ -162,6 +162,12 @@ export class PlayerState {
     this.ops = Object.freeze({});
     if (!this.isBot && (seat.loadout || seat.ops)) this.setLoadout(seat.loadout ?? null, seat.ops ?? null);
     /**
+     * 干员皮肤 (换装, docs/SKINS.md): frozen `{ [chessId]: skinId }`, {} = every piece on its default model (bots always).
+     * Cosmetic and public (Match.publicView().players[].skins), so unlike the loadout it may change in any phase.
+     */
+    this.skins = Object.freeze({});
+    if (!this.isBot && seat.skins) this.setSkins(seat.skins);
+    /**
      * 补位 (0.2.0): the base chess ids this player fields as their stand-ins — the seat's not-owned list when the match
      * started, re-checked against this match's data; frozen, sorted; [] = every operator owned (bots always)
      */

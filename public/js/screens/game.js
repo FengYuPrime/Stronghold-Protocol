@@ -776,6 +776,13 @@ function MatchScreen() {
   // ---- actions ----------------------------------------------------------------------------------------------
   const buy = useCallback((i) => actions.buy(i), []);
   const removeSpectator = useCallback((playerId) => actions.removeSpectator(playerId), []);
+  // 调试 (SP_DEV=1)：顶栏那个「+999 资金」按钮（server/match/player/economy.js devGold）。按钮只在服务端
+  // 以开发模式启动时出现（m.private.dev），普通启动里 priv.dev 不存在，这里永远不会被调用。
+  const devGoldHandler = useCallback(() => {
+    net.request('g.devGold', { n: 999 })
+      .then(() => toast(t('调试：+999 资金'), 'info', { ttl: 1200 }))
+      .catch((err) => toast(t('调试失败：{code}', { code: String((err && err.code) || err) }), 'warn'));
+  }, []);
   // 准备 with funds left asks first: the prep's end wipes them (community report #4; not 坎诺特, not at 0 funds, not
   // under AI 托管 — gameLogic.readyFundsPrompt). The button and Space both come here.
   const askingReady = useRef(false);
@@ -1438,7 +1445,8 @@ function MatchScreen() {
         pen=${pen} penAvail=${penAvail} onPen=${togglePen} config=${gd.config} frozenAt=${frozenAt}
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator}
-        spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} />
+        spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator}
+        onDevGold=${devGoldHandler} />
 
       <div class="gm__bonds">
         <button type="button" class="bonds-toggle" aria-expanded=${!bondsCollapsed} aria-controls="match-bond-strip"

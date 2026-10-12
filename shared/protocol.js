@@ -68,6 +68,27 @@ export function isBattleResult(v) {
     && optional((x) => isInt(x, 0, 1e9))(v.errors) && optional((x) => isNum(x, 0, BIG))(v.bossHpLeft);
 }
 
+// ---- 干员皮肤 (换装): room.skins { skins } ---------------------------------------------------------------------
+
+/**
+ * `room.skins { skins }`: `skins` = `{ [chessId]: skinId }` — the outfit a player picks for an operator in the
+ * 干员调配 screen. Unlike `room.loadout` these are PUBLIC: they ride in `Match.publicView().players[]`, so a teammate
+ * sees the same model on your board. Keys are chess ids (the picker stores the choice per chess), while
+ * `data/skins.json` and `data/assets.json` group the catalogue per operator id (`chars[charId].skins`) — the server
+ * normalises the two (server/lobby.js freezeSkins, server/match/player/basics.js setSkins).
+ *
+ * The check is deliberately loose: an unknown chess id or a skin this install has no files for is dropped later
+ * (the renderer falls back to the operator's own model), never a protocol error — see docs/SKINS.md.
+ */
+export const SKIN_LIMITS = Object.freeze({ entries: 256, idLen: 64 });
+/**
+ * A skinId. NOT `isId`: that allows only `[A-Za-z0-9_\-.:]`, and skin ids carry `@` and `#`
+ * (`char_002_amiya@winter#1`) plus `+` in a few collab ones.
+ */
+export const isSkinId = (v) => typeof v === 'string' && v.length > 0 && v.length <= SKIN_LIMITS.idLen && /^[A-Za-z0-9_@#+.\-]+$/.test(v);
+/** Structural check of `room.skins.skins`: a map of chess ids → skinId. */
+export const isSkinSelection = (v) => isMap(v, SKIN_LIMITS.entries, isId, isSkinId);
+
 // ---- operator loadout (DESIGN §16): room.loadout { entries } -------------------------------------------------
 
 /**
@@ -406,6 +427,9 @@ export const C2S = {
   // 自选编队 (0.2.0 DIY): the player's DIY slot picks; stored per session / seat like room.ownership (a match takes the
   // picks its seat had when it started; during a match they are stored for the next one: ROOM_STARTED)
   'room.diy': { picks: isDiyPicks },
+  // 干员皮肤 (换装, docs/SKINS.md): the outfits a player picked for their operators — PUBLIC (a teammate sees them),
+  // so unlike room.loadout there is no phase gate: the choice applies to the next battle the piece fights in
+  'room.skins': { skins: isSkinSelection },
   // spectator seats (remake feature, community report #26; MAX_SPECTATORS): take one of a co-op room's spectator seats —
   // in its lobby or while its match runs — never a player seat; the host frees one by playerId (the spectator gets
   // room.closed { reason: 'kicked' }). room.leave / g.leave leave a spectator seat like a player seat.
@@ -435,6 +459,9 @@ export const C2S = {
   'g.reward': { idx: (v) => isInt(v, 0, 5) },
   'g.choice': { idx: (v) => isInt(v, 0, 5), choiceId: isId, $optional: ['choiceId'] },
   'g.ready': { ready: isBool },
+  // 调试 (SP_DEV=1)：白给资金，方便逐个找干员试皮肤。开关关着时服务端直接拒（server/match/match/intents.js），
+  // 客户端也拿不到这个按钮（m.private.dev）。
+  'g.devGold': { n: (v) => isInt(v, 1, 100000), $optional: ['n'] },
   'g.emote': { id: (v) => EMOTES.includes(v) },
   // playerId: the player tapped in the team panel (a 联防 / boss pair field shows two) — what an eliminated viewer or a
   // spectator seat follows from then on (Match.watchPref; community report of 2026-10-06, item 56)

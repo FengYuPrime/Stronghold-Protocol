@@ -112,6 +112,51 @@ export class PlayerBasics {
   }
 
   /**
+   * 干员皮肤 (换装, docs/SKINS.md): replace this player's chosen outfits `{ [chessId]: skinId }`. Loose by design —
+   * an unknown chess id, an elite/ hidden/ promoted record or a non-string skinId is dropped, an unknown skinId is
+   * kept (the catalogue is data/skins.json and whether it can be drawn is the assets manifest's business:
+   * public/js/assets.js spineEntry falls back to the operator's own model). Bots always wear the default model.
+   * The chess id and the 自选 operator id are both accepted, so a skin set for a slot's operator applies to its piece.
+   * @param {Record<string, string>|null} skins
+   * @returns {boolean} whether anything was accepted
+   */
+  setSkins(skins) {
+    if (this.isBot) return false;
+    const out = {};
+    const dropped = [];
+    if (skins && typeof skins === 'object' && !Array.isArray(skins)) {
+      for (const [id, skinId] of Object.entries(skins)) {
+        if (typeof skinId !== 'string' || !skinId) { dropped.push(`${id}(skinId 不是字符串)`); continue; }
+        if (typeof id !== 'string') { dropped.push(`${id}(键不是字符串)`); continue; }
+        if (id.startsWith('char_') || (id.startsWith('chess_char_') && id.includes('_diy'))) { out[id] = skinId; continue; }
+        const rec = this.gd.chess(id);
+        if (!rec || rec.isGolden || rec.visible === false || rec.isHidden || (rec.baseId && rec.baseId !== id)) { dropped.push(`${id}(不是可见的普通棋子)`); continue; }
+        out[id] = skinId;
+      }
+    }
+    this.skins = Object.freeze(out);
+    if (process.env.SP_DEBUG_SKINS) {
+      this.m.log?.info?.(`[skins] PlayerState.setSkins ${this.playerId}: 保留 ${Object.keys(out).length} 条${dropped.length ? `，丢弃 ${dropped.length} 条（${dropped.slice(0, 5).join(', ')}）` : ''}`);
+    }
+    return Object.keys(out).length > 0;
+  }
+
+  /**
+   * The skinId this player's piece shows (换装): the base chess id first, then the piece id, then the 自选 slot's
+   * operator id — so an outfit chosen for an operator also dresses its promoted / slot copy. Null = the default model.
+   * @param {object|null} rec chess record of the piece (may be the elite / composed 自选 record)
+   * @param {string} pieceId the piece's own id
+   * @param {{charId?: string}|null} [diy] the 自选 pick of the piece's slot, when it is a slotted one
+   * @returns {string|null}
+   */
+  skinFor(rec, pieceId, diy = null) {
+    const map = this.skins;
+    if (!map || typeof map !== 'object') return null;
+    const baseId = (rec && rec.baseId) || pieceId;
+    return map[baseId] || map[pieceId] || (diy && diy.charId ? map[diy.charId] || map[baseId] || null : null);
+  }
+
+  /**
    * The potential / 练度 this player's piece of chess record `chessRecord` fights at (0.2.2; shared/potential.js
    * cultivationOf over `this.ops` — defaults 潜能 6, 精英2 Lv.60): the operator the player owns — the chess fielded as
    * itself, an owned 自选 pick (its charId) — or null for a 补位 stand-in and a prototype 自选 pick.
