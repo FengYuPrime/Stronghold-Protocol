@@ -12,9 +12,9 @@
 //      is missing or data/assets.json lists files that are not on disk. A failure is a warning: the game still runs
 //      with fallback visuals and the next run resumes.
 //   6. Optional: official board/UI art from a locally installed Arknights client (Windows native install, CrossOver
-//      bottle or PlayCover on macOS, or --game <dir>) with tools/local-extract/extract.py in a project-local Python
-//      venv (.venv-extract), then the board tile crops (tools/crop-board-atlas.mjs → tiles.json). Asked once on a
-//      terminal (the answer is remembered in .cache/setup-state.json; without a terminal it is skipped); never fatal.
+//      bottle or PlayCover on macOS, or --game <dir>) with tools/local-extract/extract.py in a project-local
+//      Python venv (.venv-extract), then the board tile crops (tools/crop-board-atlas.mjs → tiles.json). Asked once on
+//      a terminal (the answer is remembered in .cache/setup-state.json; without a terminal it is skipped); never fatal.
 //
 // Options:
 //   --check          report only, change nothing (exit 1 when something essential is missing)
@@ -24,7 +24,9 @@
 //                    An empty SP_GITHUB_PROXY disables the proxy, including in mirror mode.
 //   --no-local       skip the local-client detection and extraction
 //   --local          extract from the local client without asking (re-extracts when already done)
-//   --game <dir>     AssetBundle root of the local client (…/StreamingAssets/AB/Windows or PlayCover …/Documents/Bundles)
+//   --game <dir>     AssetBundle root of the local client: …/Arknights_Data/StreamingAssets/AB (its Windows
+//                    subfolder is taken) or …/AB/Windows, or the PlayCover …/Documents/Bundles. Needs no setting
+//                    for the usual install locations, which are scanned automatically.
 //   -y, --yes        answer "yes" to every question
 //   --quiet          fewer lines (used by scripts/launch.mjs)
 //   -h, --help
@@ -98,6 +100,31 @@ export function capture(cmd, args, { timeout = 15000, shell = false, env } = {})
   } catch (e) {
     return { ok: false, status: -1, out: String(e?.message || e) };
   }
+}
+
+/**
+ * Take a game directory — any of `…/StreamingAssets/AB`, `…/AB/Windows` or the AB/Windows root itself —
+ * and return the AB/Windows root the extractor wants. Used for the explicit --game path (gameCandidates),
+ * so both accept a path as it was copied out of the file manager: a path that already ends in …
+ * \Arknights_Data\StreamingAssets\AB\Windows must keep its last segment, while … \StreamingAssets\AB
+ * (the parent of that Windows folder) must descend into it. 'Windows' is also a real folder name inside
+ * the bundle tree, so only the tail of an AB path is trimmed, never an arbitrary segment.
+ * @param {string} dir
+ * @returns {string} absolute path
+ */
+export function gameDirFor(dir) {
+  let p = path.resolve(dir);
+  // Already the AB/Windows root the extractor wants (a sibling Windows folder is the common case).
+  if (exists(path.join(p, 'Windows'))) return path.join(p, 'Windows');
+  // …\StreamingAssets\AB → its Windows subfolder. Only the known tail of an AB path is trimmed, so a path
+  // that merely ends in a folder called Windows stays untouched.
+  for (let i = AB_TAIL.length - 1; i > 0; i--) {
+    if (path.basename(p).toLowerCase() !== AB_TAIL[i].toLowerCase()) break;
+    const up = path.dirname(p);
+    if (path.basename(up).toLowerCase() === AB_TAIL[i - 1].toLowerCase()) p = up;
+    break;
+  }
+  return p;
 }
 
 function npmCommand() {
@@ -243,7 +270,26 @@ function cropBoardTiles(log) {
 // Local Arknights client detection
 // ---------------------------------------------------------------------------------------------------
 
+/** Path tail of an AssetBundle root inside a client install (Arknights_Data/StreamingAssets/AB/Windows). */
 const AB_TAIL = ['Arknights_Data', 'StreamingAssets', 'AB', 'Windows'];
+
+/**
+ * The install directories the Hypergryph launcher uses on Windows. The folder holding the client is
+ * 「Arknights Game」 (with the space) in current versions — "Arknights" alone was the older layout — and the
+ * launcher may itself live directly on a drive (`G:\Hypergryph Launcher\games\…`) instead of under Program Files.
+ */
+const WIN_GAME_DIRS = ['Arknights Game', 'Arknights'];
+
+/**
+ * The one candidate of an explicit --game path, for a client the scan below cannot see (another drive, a
+ * renamed folder). It is given either as `…\StreamingAssets\AB` or as the AB\Windows root itself —
+ * gameDirFor() takes either form.
+ * @param {string} explicit
+ * @returns {{ path: string, kind: string }[]}
+ */
+export function gameCandidates(explicit) {
+  return [{ path: gameDirFor(explicit), kind: '--game' }];
+}
 
 /** Candidate AssetBundle roots for this OS (existence not checked). */
 export function clientCandidates() {
@@ -253,6 +299,10 @@ export function clientCandidates() {
   if (IS_WIN) {
     const drives = ['C', 'D', 'E', 'F', 'G', 'H'];
     const bases = [
+      ['Program Files', 'Hypergryph Launcher', 'games', 'Arknights Game'],
+      ['Program Files (x86)', 'Hypergryph Launcher', 'games', 'Arknights Game'],
+      ['Hypergryph Launcher', 'games', 'Arknights Game'],
+      ['Games', 'Hypergryph Launcher', 'games', 'Arknights Game'],
       ['Program Files', 'Hypergryph Launcher', 'games', 'Arknights'],
       ['Program Files (x86)', 'Hypergryph Launcher', 'games', 'Arknights'],
       ['Hypergryph Launcher', 'games', 'Arknights'],
@@ -269,14 +319,18 @@ export function clientCandidates() {
     names.sort((a, b) => (b === 'Arknights') - (a === 'Arknights'));
     for (const n of names) {
       for (const pf of ['Program Files', 'Program Files (x86)']) {
-        add(path.join(bottles, n, 'drive_c', pf, 'Hypergryph Launcher', 'games', 'Arknights', ...AB_TAIL), `CrossOver (${n})`);
+        for (const g of WIN_GAME_DIRS) {
+          add(path.join(bottles, n, 'drive_c', pf, 'Hypergryph Launcher', 'games', g, ...AB_TAIL), `CrossOver (${n})`);
+        }
       }
     }
     add(path.join(home, 'Library', 'Containers', 'com.hypergryph.arknights', 'Data', 'Documents', 'Bundles'), 'PlayCover');
   }
   if (!IS_WIN) {
     for (const prefix of [path.join(home, '.wine'), path.join(home, 'Games', 'arknights')]) {
-      add(path.join(prefix, 'drive_c', 'Program Files', 'Hypergryph Launcher', 'games', 'Arknights', ...AB_TAIL), 'Wine');
+      for (const g of WIN_GAME_DIRS) {
+        add(path.join(prefix, 'drive_c', 'Program Files', 'Hypergryph Launcher', 'games', g, ...AB_TAIL), 'Wine');
+      }
     }
   }
   return out;
@@ -289,9 +343,9 @@ export function inspectClientRoot(dir) {
   return { exists: true, autochess };
 }
 
-/** First installed client (explicit dir first). */
+/** First installed client (explicit dir first; either form of --game is accepted, gameDirFor()). */
 export function findClient(explicit) {
-  const list = explicit ? [{ path: path.resolve(explicit), kind: '--game' }] : clientCandidates();
+  const list = explicit ? gameCandidates(explicit) : clientCandidates();
   let partial = null;
   for (const cand of list) {
     const info = inspectClientRoot(cand.path);
@@ -455,7 +509,7 @@ async function main() {
     if (!client) {
       if (already && local.board3d && !local.tiles && !opts.check) cropBoardTiles(log);
       add(already ? 'ok' : 'skip', '本地客户端美术（可选）', already ? `已提取 ${local.count} 项`
-        : `${opts.game ? `找不到 ${opts.game}` : '未检测到本机明日方舟客户端'}：${LOCAL_ART_FALLBACK}（见 docs/DEPLOY.md 第 6 节）`);
+        : `${opts.game ? `找不到 ${opts.game}` : '未检测到本机明日方舟客户端'}（装在别处时：node tools/setup.mjs --game "<…\\StreamingAssets\\AB>"）：${LOCAL_ART_FALLBACK}（见 docs/DEPLOY.md 第 6 节）`);
     } else if (!client.autochess) {
       add(already ? 'ok' : 'warn', '本地客户端美术（可选）', `${client.kind} 客户端缺少卫戍协议资源（请在游戏内下载全部资源）：${client.path}`);
     } else if (already && opts.local !== 'force') {

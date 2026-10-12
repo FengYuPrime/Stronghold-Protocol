@@ -19,8 +19,20 @@ export class PlayerEconomy {
     return this.funds - before;
   }
 
-  spend(n) {
-    const v = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+  /**
+   * 调试 (g.devGold, SP_DEV=1): hand the caller free funds so a skin can be tested against any operator without playing
+   * the economy. Reaches here only through MatchIntents, which refuses the intent unless the match runs with devGold;
+   * `reason: 'dev'` keeps it out of the结算 statistics.
+   * @param {number} [n] how much (default 999), clamped to a sane range
+   * @returns {{ ok: true, funds: number, gained: number }}
+   */
+  devGold(n = 999) {
+    const want = Number.isFinite(n) ? Math.max(1, Math.min(100000, Math.trunc(n))) : 999;
+    const gained = this.addFunds(want, { reason: 'dev' });
+    return { ok: true, funds: this.funds, gained };
+  }
+
+  spend(n) {    const v = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
     if (v > this.funds) return false;
     this.funds -= v;
     this.stats.gold += v;

@@ -262,6 +262,12 @@ export class Match {
     this.ds = dataSourceFor(this.data);
     /** client-side combat (DESIGN §14) — see the header */
     this.clientCombat = opts.clientCombat != null ? !!opts.clientCombat : envClientCombat();
+    /**
+     * 调试模式 (SP_DEV=1): enables the dev-only intents — currently `g.devGold`, the「+999 资金」button the prep screen
+     * shows while this is on (server/match/player/economy.js devGold). Off in a normal boot, so neither the intent nor
+     * the button exists there.
+     */
+    this.devGold = opts.devGold === true;
     this.verifyMode = parseVerify(opts.verify ?? env('SP_VERIFY'));
     /** wall-clock ms per slice of a server-run normal / 联防 field (virtual time: at once) */
     this.headlessSliceMs = Number.isFinite(opts.headlessSliceMs) && opts.headlessSliceMs > 0 ? opts.headlessSliceMs : this.sched.virtual ? Infinity : HEADLESS_SLICE_MS;

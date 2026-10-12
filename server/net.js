@@ -114,6 +114,8 @@ export class Session {
     this.loadout = null;
     /** @type {Readonly<Record<string, { potential: number, cultivate: number }>> | null} checked per-operator 潜能 / 练度 (lobby-owned, 0.2.2; room.loadout `ops`) */
     this.ops = null;
+    /** @type {Readonly<Record<string, string>> | null} checked 干员皮肤 choices `{ [chessId]: skinId }` (lobby-owned, 换装) */
+    this.skins = null;
     /** @type {readonly string[] | null} checked not-owned chess ids (干员持有, lobby-owned, 0.2.0 补位) */
     this.notOwned = null;
     /** @type {Readonly<Record<string, { charId: string, skillIndex: number, uniEquipId: string|null }>> | null} checked 自选 picks (lobby-owned, 0.2.0 自选编队) */

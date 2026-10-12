@@ -357,7 +357,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  */
 export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  spectators = null, myId = null, isHost = false, onRemoveSpectator = null }) {
+  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, onDevGold = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
   const lp = boss && Number.isFinite(pub?.teamLp) ? pub.teamLp : Number.isFinite(priv?.lp) ? priv.lp : null;
@@ -388,6 +388,7 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
           <${SpectatorPill} spectators=${spectators} myId=${myId} isHost=${isHost} onRemove=${onRemoveSpectator} />
         </div>
         ${pub?.difficulty ? html`<${DifficultyTag} difficulty=${pub.difficulty} size="sm" />` : null}
+        ${priv?.dev && onDevGold ? html`<button type="button" class="gtop__dev" data-testid="dev-gold" title=${t('开发调试：+999 资金')} onClick=${onDevGold}>${t('+999 资金')}</button>` : null}
       </div>
     </div>
 

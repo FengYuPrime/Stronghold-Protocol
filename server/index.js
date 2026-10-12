@@ -28,6 +28,7 @@ import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustP
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
 import { createPackRegistry } from './packs.js';
+import { createPluginRegistry } from './plugins.js';
 import { MIME, COMPRESSIBLE, acceptsGzip, parseRange } from './http/files.js';
 import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/buildTag.js';
 import { createRequestHandler } from './http/routes.js';
@@ -54,12 +55,13 @@ export {
  * @returns {Promise<{ port: number, host: string, url: string, server: http.Server, wss: import('ws').WebSocketServer,
  *                     lobby: import('./lobby.js').Lobby, network: import('./net.js').Network,
  *                     registry: import('./net.js').SessionRegistry, packs: ReturnType<typeof createPackRegistry>,
+ *                     plugins: ReturnType<typeof createPluginRegistry>,
  *                     close: () => Promise<void> }>}
  */
 export async function startServer(opts = {}) {
   const { port, host } = listenAddress(opts);
   const log = opts.log || makeLogger(!!opts.quiet);
-  const { publicDir, dataDir, sharedDir, packsDir } = serveDirs(opts);
+  const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);
 
   // The process-wide singleton serves the default data dir; a custom dir (tests) gets its own copy.
   const data = opts.dataDir ? loadData(dataDir, { log }) : getData({ dir: dataDir, log });
@@ -67,7 +69,11 @@ export async function startServer(opts = {}) {
   // content packs (docs/PACKS.md): scanned now — the start log names them — and again whenever their folders change
   const packs = createPackRegistry({ publicDir, dataDir, packsDir }, { log });
   packs.refresh(true);
-  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, log });
+  // optional plugins (docs/PLUGINS.md): the same scan-once-then-recheck model; the folders are theirs, the server
+  // only lists them and serves the files their manifests name — a server without plugins/ has none
+  const plugins = createPluginRegistry({ pluginsDir }, { log });
+  plugins.refresh(true);
+  const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, packsDir, packs, pluginsDir, plugins, log });
   const startedAt = Date.now();
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();

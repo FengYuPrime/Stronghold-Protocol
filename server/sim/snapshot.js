@@ -35,6 +35,9 @@ export function unitInfo(u) {
     tier: d.tier ?? (d.rank === 'BOSS' ? 3 : d.rank === 'ELITE' ? 2 : 1),
     golden: !!d.golden,
     spine: d.spine ?? d.charId ?? u.defId,
+    // 换装 (干员皮肤): the outfit of the unit's owner — `undefined`, not null, so JSON.stringify drops it and a match
+    // without skins keeps the byte-identical wire format of DESIGN §8.2
+    skin: u.skin ?? undefined,
     avatar: d.avatar ?? d.charId ?? u.defId,
     x: r2(u.x),
     y: r2(u.y),

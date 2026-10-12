@@ -123,6 +123,10 @@ export class PlayerRound {
         // 干员调配 settings, 潜能 6 / 精英2 Lv.60 by default and for bots; never a stand-in's nor a prototype pick's)
         const cv = u.standIn ? null : this.cultivationFor(this.gd.chess(piece.id));
         if (cv) { u.potential = cv.potential; u.cultivate = cv.cultivate; }
+        // 换装 (干员皮肤): the outfit this player picked for the operator (base chess id, the piece id, or the 自选
+        // operator of the slot) — the sim carries it into the Unit and the snapshot, the renderer draws it
+        const skin = this.skinFor(this.gd.chess(piece.id), piece.id, pick || null);
+        if (skin) u.skin = skin;
         if (carry && carry.has(piece.uid)) u.carryState = carry.get(piece.uid);
         units.push(u);
       } else if (piece.kind === 'token') {

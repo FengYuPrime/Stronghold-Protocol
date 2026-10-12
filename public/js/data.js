@@ -44,6 +44,9 @@ export const DATA_FILES = Object.freeze({
   choices: 'choices.json',
   config: 'config.json',
   assets: 'assets.json',
+  // 干员换装（皮肤）目录 (换装): { version, counts, chars: { [charId]: [{ id, name, group }] } } — a pure list, no
+  // URLs: whether this install can draw a skin is data/assets.json `chars[charId].skins` (public/js/ui/skins.js).
+  skins: 'skins.json',
   // 补位 stand-ins (DATA.md §18): the bodies the 干员持有 screen, the cards and the detail card compose (shared/standIn.js)
   backups: 'backups.json',
   // Optional art extracted from a local game client (DESIGN §13): { groups: { '<subdir>': { name: { path, w, h } } } }.

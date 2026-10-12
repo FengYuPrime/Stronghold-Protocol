@@ -32,6 +32,19 @@
 .gtop__meta { display: flex; flex-direction: column; align-items: flex-start; gap: .06rem; }
 /* the latency pill and, beside it, the 观战席 capsule (ui/hud.js SpectatorPill: an eye + how many are watching; opens the roster) */
 .gtop__net { display: flex; align-items: center; gap: .08rem; }
+/* 调试按钮 (SP_DEV=1)：只在服务端以开发模式启动时出现（m.private.dev），见 server/match/player/economy.js devGold */
+.gtop__dev {
+  height: max(calc(.22 * var(--t)), 20px);
+  padding: 0 max(calc(.08 * var(--t)), 8px);
+  font-size: max(calc(.11 * var(--t)), 9px);
+  font-weight: 700;
+  color: var(--amber, #ffc600);
+  background: rgba(0, 0, 0, .5);
+  border: 1px dashed rgba(255, 198, 0, .6);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.gtop__dev:hover { color: var(--ice-900, #0d1512); background: var(--amber, #ffc600); }
 .specpill { --btn-bg: rgba(0, 0, 0, .5); --btn-bg-hover: rgba(0, 0, 0, .66); --btn-bd: var(--line); height: .32rem; min-width: 0; padding: 0 .12rem; gap: .05rem; border-radius: 99px; }
 .specpill .btn__icon { width: .18rem; height: .18rem; color: var(--mint-500); }
 .specpill__num { font-size: .18rem; font-weight: 700; color: var(--mint-400); }

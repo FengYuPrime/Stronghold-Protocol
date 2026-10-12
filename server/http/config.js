@@ -52,8 +52,9 @@ export function bindCandidates(host) {
 }
 
 /**
- * The directories the static server reads (packsDir: the pack folders, server/packs.js).
- * @param {{ publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string }} opts
+ * The directories the static server reads (packsDir: the pack folders, server/packs.js; pluginsDir: the optional
+ * plugin folders, server/plugins.js).
+ * @param {{ publicDir?: string, dataDir?: string, sharedDir?: string, packsDir?: string, pluginsDir?: string }} opts
  */
 export function serveDirs(opts) {
   return {
@@ -61,6 +62,7 @@ export function serveDirs(opts) {
     dataDir: opts.dataDir || path.join(ROOT, 'data'),
     sharedDir: opts.sharedDir || path.join(ROOT, 'shared'),
     packsDir: opts.packsDir || path.join(ROOT, 'packs'),
+    pluginsDir: opts.pluginsDir || path.join(ROOT, 'plugins'),
   };
 }
 
@@ -80,7 +82,17 @@ export function lobbyOptionsFrom(opts) {
   for (const k of LOBBY_OPTION_KEYS) {
     if (opts[k] != null) lobbyOptions[k] = opts[k];
   }
+  // 调试开关 (devGold): 起服时 SP_DEV=1 打开，客户端会多出一个「+999 资金」按钮（server/match/player/economy.js
+  // devGold）。只在这里读一次环境变量，按对局带过去，所以线上/普通启动里这条命令根本不存在。
+  lobbyOptions.devGold = opts.devGold != null ? !!opts.devGold : isDev();
   return lobbyOptions;
+}
+
+/** 是否开启了开发调试（SP_DEV=1 / true / on）；也接受命令行 --dev（tools/setup.mjs、npm run dev 用得上）。 */
+export function isDev(argv = process.argv) {
+  const v = String(process.env.SP_DEV ?? '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  return Array.isArray(argv) && argv.includes('--dev');
 }
 
 /** TRUST_PROXY env → net.js trustProxy ('auto' unless explicitly on/off). @param {string | undefined} v */
