@@ -96,6 +96,22 @@ npm start          # 启动服务器：http://localhost:3000
 - 素材下载优先使用 GitHub，失败时自动改用 jsDelivr 镜像。
 - `npm run doctor`（即 `node tools/doctor.mjs`）可以随时诊断：Node 版本、素材是否完整、端口占用、局域网地址和防火墙。
 
+<!-- ===== 本 fork 追加：素材单独一个仓库 ===== -->
+> **本 fork 的素材仓库（可选）**：素材是游戏美术（© Hypergryph / Yostar），按上游规则**不进源码仓库**
+> （`.gitignore` 的 no game art in git）。本 fork 把整份 `public/assets/`（约 1.16 GB：Spine 模型含皮肤、
+> 半身立绘、音频、以及**只能从本机客户端提取、公开镜像拿不到**的那 70 MB）放在**私有**仓库里，方便在几台
+> 自己的机器之间同步：
+>
+> ```bash
+> git clone https://github.com/FengYuPrime/Stronghold-Protocol-assets.git public/assets
+> ```
+>
+> `public/assets/` 在源码仓库里是 gitignored 的，所以在它里面放另一个 git 仓库互不影响
+> （`git status` 不会看到它）。也可以完全不用它：`npm run setup` 能下回公开镜像那部分；皮肤模型与
+> 本机客户端提取物的获取方式见 [docs/SKINS.md](docs/SKINS.md)。
+> **请把该仓库保持 private**（含游戏美术，公开即再分发）。
+<!-- ===== 本 fork 追加结束 ===== -->
+
 ### 系统要求
 
 | 项目 | 要求 |

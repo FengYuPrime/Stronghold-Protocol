@@ -136,21 +136,21 @@ export function installSkinsSync({ net, timers } = {}) {
       const my = ++seq;
       pendingJson = json;
       setState('sending');
-      debugLog('→ room.skins', json, '(在线:', net.status, ')');
+      debugLog('→ room.skins', json, '(online:', net.status, ')');
       try {
         await net.request('room.skins', { skins });
         if (my !== seq) return;
         pendingJson = null;
         lastSent = json;
         setState('synced');
-        debugLog('← room.skins 收到回执（已同步）');
+        debugLog('← room.skins ack (synced)');
       } catch (err) {
         if (my !== seq) return;
         pendingJson = null;
         const code = err && err.code;
-        if (code === 'RATE' || code === 'TIMEOUT' || code === 'OFFLINE') { debugLog('← room.skins 暂时失败，稍后重试', code); schedule(RETRY_MS); return; }
+        if (code === 'RATE' || code === 'TIMEOUT' || code === 'OFFLINE') { debugLog('← room.skins transient failure, will retry', code); schedule(RETRY_MS); return; }
         console.warn('[skins] room.skins refused', code, err && err.detail);
-        debugLog('← room.skins 被拒', code, err && err.detail);
+        debugLog('← room.skins refused', code, err && err.detail);
         setState('error');
       }
     } catch (e) {
@@ -159,8 +159,8 @@ export function installSkinsSync({ net, timers } = {}) {
     }
   }
 
-  const offWelcome = net.on('welcome', () => { debugLog('welcome → 重发当前选择'); lastSent = null; pendingJson = null; seq++; schedule(50); });
-  const offStore = skinsStore.subscribe((s, prev) => { if (s.entries !== prev.entries) { debugLog('选择变了 →', JSON.stringify(s.entries)); schedule(); } });
+  const offWelcome = net.on('welcome', () => { debugLog('welcome → re-sending current choice'); lastSent = null; pendingJson = null; seq++; schedule(50); });
+  const offStore = skinsStore.subscribe((s, prev) => { if (s.entries !== prev.entries) { debugLog('selection changed →', JSON.stringify(s.entries)); schedule(); } });
 
   return {
     flush,

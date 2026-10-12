@@ -7,6 +7,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -22,7 +23,8 @@ import { TestClient } from './helpers/wsClient.js';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+// fileURLToPath 才会做百分号解码：`new URL().pathname` 在含非 ASCII 的仓库路径（例如 `G:\卫\…`）下会拼出假路径。
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------------------------------------------------------------------------------------------------
 // helpers

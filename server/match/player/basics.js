@@ -126,17 +126,17 @@ export class PlayerBasics {
     const dropped = [];
     if (skins && typeof skins === 'object' && !Array.isArray(skins)) {
       for (const [id, skinId] of Object.entries(skins)) {
-        if (typeof skinId !== 'string' || !skinId) { dropped.push(`${id}(skinId 不是字符串)`); continue; }
-        if (typeof id !== 'string') { dropped.push(`${id}(键不是字符串)`); continue; }
+        if (typeof skinId !== 'string' || !skinId) { dropped.push(`${id}(skinId is not a string)`); continue; }
+        if (typeof id !== 'string') { dropped.push(`${id}(key is not a string)`); continue; }
         if (id.startsWith('char_') || (id.startsWith('chess_char_') && id.includes('_diy'))) { out[id] = skinId; continue; }
         const rec = this.gd.chess(id);
-        if (!rec || rec.isGolden || rec.visible === false || rec.isHidden || (rec.baseId && rec.baseId !== id)) { dropped.push(`${id}(不是可见的普通棋子)`); continue; }
+        if (!rec || rec.isGolden || rec.visible === false || rec.isHidden || (rec.baseId && rec.baseId !== id)) { dropped.push(`${id}(not a visible normal chess)`); continue; }
         out[id] = skinId;
       }
     }
     this.skins = Object.freeze(out);
     if (process.env.SP_DEBUG_SKINS) {
-      this.m.log?.info?.(`[skins] PlayerState.setSkins ${this.playerId}: 保留 ${Object.keys(out).length} 条${dropped.length ? `，丢弃 ${dropped.length} 条（${dropped.slice(0, 5).join(', ')}）` : ''}`);
+      this.m.log?.info?.(`[skins] PlayerState.setSkins ${this.playerId}: kept ${Object.keys(out).length}${dropped.length ? `, dropped ${dropped.length} (${dropped.slice(0, 5).join(', ')})` : ''}`);
     }
     return Object.keys(out).length > 0;
   }

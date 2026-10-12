@@ -8,10 +8,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { artPlan, formatSummary, isPlayerFile, isRefused } from '../tools/package.mjs';
 import { localGaps, sceneInstallPlan } from '../tools/setup.mjs';
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+// 用 fileURLToPath 而不是 new URL().pathname：后者不做百分号解码，仓库路径里含非 ASCII（例如 `G:\卫\…`）
+// 时会拼出 `G:\G:\%E5%8D%AB\…` 这样的假路径，测试在中文目录下必然 ENOENT（上游 CI 是 ASCII 路径所以没暴露）。
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('sceneInstallPlan: fetch only with a client and extractor deps; otherwise the metal board', () => {
   const present = sceneInstallPlan({ hasScenes: true, client: false });
