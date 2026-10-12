@@ -1,0 +1,85 @@
+/* 「战后统计」插件（plugins/match-charts）：结算页按钮 + 白底黑字弹窗 + ECharts 容器。
+   自带浅色配色，不依赖项目的暗色主题（弹窗是白底黑字）。 */
+   弹窗自带一套浅色样式（不依赖项目的暗色主题变量），所以黑底页面上也是一块干净的白板。 */
+.dpsm-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #06110d;
+  background: var(--mint-400, #4ed8af);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+.dpsm-open::before { content: '📈'; font-size: 14px; }
+.dpsm-open:hover { background: #7ff0d0; }
+
+.dpsm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+}
+.dpsm-modal__box {
+  width: min(900px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  color: #111418;
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+.dpsm-modal__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e3e7e6;
+}
+.dpsm-modal__title { margin: 0; font-size: 16px; font-weight: 700; color: #0b0f14; }
+.dpsm-modal__tabs { display: flex; }
+.dpsm-modal__tabs button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  color: #3b4450;
+  background: #eef1f0;
+  border: 1px solid #d5dbd9;
+  border-right-width: 0;
+  cursor: pointer;
+}
+.dpsm-modal__tabs button:first-child { border-radius: 3px 0 0 3px; }
+.dpsm-modal__tabs button:last-child { border-right-width: 1px; border-radius: 0 3px 3px 0; }
+.dpsm-modal__tabs button.is-on { color: #fff; background: #1971c2; border-color: #1971c2; }
+.dpsm-modal__sum { margin-left: auto; font-family: var(--font-num, monospace); font-size: 13px; color: #3b4450; }
+.dpsm-modal__x {
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 6px;
+  color: #3b4450;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.dpsm-modal__x:hover { color: #c92a2a; }
+.dpsm-modal__body { padding: 4px 16px 14px; }
+.dpsm-modal__empty { padding: 22px 16px; }
+.dpsm-modal__emptyline { margin: 0; font-size: 14px; color: #1a2027; }
+/* 没数据时的诊断行：编号有没有存到 / 副本里几回合（用户不用翻控制台就能看出断在哪） */
+.dpsm-modal__diag { margin: 8px 0 0; font-size: 12px; color: #5b6470; }
+/* 折线图容器（ECharts 自己画 canvas；尺寸由这里定，容器变化时组件会 chart.resize()） */
+.dpsm-echart { width: 100%; height: 340px; }
+.dpsm-modal__note { margin: 8px 0 0; font-size: 12px; color: #5b6470; }

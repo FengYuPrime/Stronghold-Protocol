@@ -310,7 +310,8 @@ function StatsScreen({ tab }) {
     toast(t('已清空本机统计数据'), 'success');
   };
 
-  if (replay) return html`<div class="st st--replay" ref=${boxRef} tabindex="-1" role="dialog" aria-modal="true" aria-label=${t('统计数据')}>
+  // data-record：这一条记录的 id（插件——plugins/match-charts 的战后曲线——用它认领「当前在看哪一局」；核心不读它）
+  if (replay) return html`<div class="st st--replay" data-record=${replay.id || null} ref=${boxRef} tabindex="-1" role="dialog" aria-modal="true" aria-label=${t('统计数据')}>
     <${Replay} rec=${replay} onBack=${() => setReplay(null)} />
   </div>`;
 

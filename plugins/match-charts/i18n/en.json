@@ -1,0 +1,17 @@
+{
+  "战斗统计": "Battle statistics",
+  "关闭": "Close",
+  "总伤害": "Total damage",
+  "平均 DPS": "Avg DPS",
+  "总治疗": "Total healing",
+  "平均 HPS": "Avg HPS",
+  "总伤": "Damage",
+  "每回合战斗统计": "Per-round battle statistics",
+  "这一局没有战斗统计（当时未开启统计悬浮窗）": "No battle statistics for this match (the stats overlay was off)",
+  "统计口径": "Metric",
+  "查看每回合各干员的输出曲线": "See each operator’s per-round output",
+  "每回合伤害量": "damage per round",
+  "每回合治疗量": "healing per round",
+  "最后一回合": "final round",
+  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "Chart library missing: run npm install && npm run vendor in the repo root, then restart"
+}

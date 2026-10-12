@@ -7,6 +7,8 @@
 // Preact's hooks build imports the bare specifier "preact"; it is rewritten to the sibling './preact.module.js' (the
 // same URL the import map resolves "preact" to, so one Preact instance) — module graphs then load without import-map
 // support (Safari < 16.4).
+// echarts.module.js is the ECharts ES build the 战斗统计 plugin draws its per-round line chart with (the maintainer
+// asked for ECharts over the hand-rolled SVG); the plugin imports it dynamically, so a missing copy degrades to a note.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +42,8 @@ export const VENDOR_FILES = Object.freeze([
   ['node_modules/htm/dist/htm.module.js', 'htm.module.js'],
   ['node_modules/three/build/three.core.js', 'three.core.js', true],
   ['node_modules/three/build/three.module.js', 'three.module.js', true],
+  // 战斗统计插件的折线图（用户指定用 ECharts）。可选：没装时插件里显示一句提示，其余功能照常。
+  ['node_modules/echarts/dist/echarts.esm.min.js', 'echarts.module.js', true],
 ]);
 
 export function vendor({ log = console.log, warn = console.warn } = {}) {

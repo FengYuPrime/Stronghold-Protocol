@@ -1,0 +1,17 @@
+{
+  "type": "plugin",
+  "name": "战后统计图表",
+  "description": "结算页「模拟完成」标题旁的按钮：点开是一张 ECharts 折线图，一人一条线，横轴是回合数、竖轴是该干员该回合的总伤（可切总治疗）；鼠标悬浮看各回合数值，点图例可隐藏该线。插件自己取样并保存每一局的每回合明细，删掉它不影响任何其它功能。",
+  "version": "1.0.0",
+  "app": ">=0.2.4",
+  "authors": ["Stronghold Protocol contributors"],
+  "license": "GPL-3.0-or-later",
+  "ui": true,
+  "entry": "plugin.js",
+  "files": {
+    "css": "plugin.css",
+    "core": "charts-core.js",
+    "chart": "chart.js",
+    "i18n": "i18n"
+  }
+}

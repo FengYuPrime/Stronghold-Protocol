@@ -1,0 +1,16 @@
+{
+  "type": "plugin",
+  "name": "战斗统计 DPS 悬浮窗",
+  "description": "对局中显示每个干员的 DPS（近 10 秒 / 总体）与总伤、治疗量，可切当前战场或全部战场，按总伤排名；每回合留下可折叠的历史方便复盘。只读战斗模拟的统计，不参与计算。",
+  "version": "1.2.0",
+  "app": ">=0.2.4",
+  "authors": ["Stronghold Protocol contributors"],
+  "license": "GPL-3.0-or-later",
+  "ui": true,
+  "entry": "plugin.js",
+  "files": {
+    "css": "plugin.css",
+    "core": "dps-core.js",
+    "i18n": "i18n"
+  }
+}

@@ -886,6 +886,47 @@ export function createBattleRunner(deps) {
           return si ? { ...o, standInFor: si } : o;
         });
     },
+    /**
+     * Cumulative battle stats of the units on screen — the read-only tap the two 战斗统计 plugins read
+     * (plugins/dps-meter 的对局悬浮窗与 plugins/match-charts 的战后曲线，见 docs/PLUGINS.md): per ally unit its
+     * running damage, healing, attacks, kills and damage taken, plus the battle's game time as the denominator.
+     * Nothing here is computed by the core: `stats` is what the simulation has already accumulated on each unit
+     * (sim/units.js), so a caller can derive DPS / HPS itself. Both plugins are optional: with neither installed,
+     * nothing calls this.
+     *
+     * `done` is the battle's own finished flag: it turns true the moment the battle is over, which is how a caller
+     * learns a round ENDED before the next round's b.start replaces the entry (the entry is only cleared at the next
+     * prep) — without it, a per-round statistic could only be closed when the following round started.
+     * @param {string|null} [fieldId] a field other than the one on screen → []
+     * @returns {{ battleId: string, fieldId: string, kind: string, time: number, done: boolean,
+     *   units: { unitId: number, ownerId: string|null, defId: string, name: string, kind: string, golden: boolean,
+     *            dmg: number, heal: number, taken: number, attacks: number, kills: number }[] }}
+     */
+    fieldUnits(fieldId = null) {
+      const e = cur;
+      if (!e || !e.battle || (fieldId != null && e.fieldId !== fieldId)) return { battleId: null, fieldId: null, kind: null, time: 0, done: false, units: [] };
+      const time = Number.isFinite(e.battle.time) ? e.battle.time : 0;
+      const list = Array.isArray(e.battle.allyUnits) ? e.battle.allyUnits : [];
+      const units = [];
+      for (const u of list) {
+        if (!u) continue;
+        const st = u.stats || null;
+        units.push({
+          unitId: Number.isInteger(u.id) ? u.id : null,
+          ownerId: typeof u.ownerId === 'string' ? u.ownerId : null,
+          defId: typeof u.defId === 'string' ? u.defId : null,
+          name: typeof u.name === 'string' ? u.name : (u.defId || ''),
+          kind: typeof u.kind === 'string' ? u.kind : 'op',
+          golden: !!(u.def && u.def.golden),
+          dmg: st ? Math.max(0, st.dmg || 0) : 0,
+          heal: st ? Math.max(0, st.heal || 0) : 0,
+          taken: st ? Math.max(0, st.taken || 0) : 0,
+          attacks: st ? Math.max(0, st.attacks || 0) : 0,
+          kills: st ? Math.max(0, st.kills || 0) : 0,
+        });
+      }
+      return { battleId: e.battleId, fieldId: e.fieldId, kind: e.kind, time, done: !!e.done, units };
+    },
     /** Re-show the current battle (the game screen remounted). */
     reshow() { if (cur) show(cur); },
     /** Test / debug hooks. */

@@ -558,7 +558,13 @@ function storeRecord(rec) {
  * @returns {any|null}
  */
 export function recordResult(res, ctx = {}) {
-  return storeRecord(buildRecord(res, ctx));
+  const rec = storeRecord(buildRecord(res, ctx));
+  // 一局记录落库点：插件（plugins/match-charts 的战后曲线）靠这个事件把同一局的每回合明细按同一个 record.id
+  // 存下来。没装那个插件时这个事件没人听，核心自己不读它。
+  if (rec) {
+    try { globalThis.dispatchEvent?.(new CustomEvent('sp:match-record', { detail: rec })); } catch { /* no DOM: fine */ }
+  }
+  return rec;
 }
 
 /**

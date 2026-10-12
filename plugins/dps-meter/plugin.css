@@ -1,0 +1,178 @@
+/* 战斗统计（DPS / 治疗）悬浮窗 —— 所有类名以 .dpsm- 开头，避免与项目样式冲突。
+   配色：**不跟随项目的 --text-dim/--text-lo**（它们在黑底上太暗，实测 --text-dim=#5d6863 约 2.5:1，
+   根本看不清），改用插件自己的高对比文字色，只在明确是次要信息时才降一档。 */
+
+.dpsm, .dpsm-toggle {
+  --dpsm-hi: #f4f7f5;    /* 主要文字（标题、数值） */
+  --dpsm-md: #d5ded9;    /* 次要文字（干员名、列标题） */
+  --dpsm-lo: #aeb9b4;    /* 第三级（单位、轴刻度）——仍保持 5:1 以上 */
+}
+
+.dpsm-toggle {
+  position: fixed;
+  left: 14px;
+  bottom: 106px;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  min-width: max(0.62rem, 44px);
+  height: max(0.32rem, 22px);
+  padding: 0 0.06rem;
+  font-family: var(--font-num, monospace);
+  font-size: max(0.14rem, 10px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  background: rgba(8, 14, 12, 0.9);
+  border: 1px solid rgba(78, 216, 175, 0.7);
+  border-radius: 3px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.dpsm-toggle:hover { color: #fff; border-color: var(--mint-400, #4ed8af); background: rgba(14, 24, 21, 0.95); }
+.dpsm-toggle.is-on { color: #0d1512; background: var(--mint-400, #4ed8af); border-color: var(--mint-400, #4ed8af); }
+.dpsm-toggle.is-live:not(.is-on) { animation: dpsm-pulse 1.6s ease-in-out infinite; }
+@keyframes dpsm-pulse { 0%, 100% { border-color: rgba(78, 216, 175, .5); } 50% { border-color: rgba(78, 216, 175, 1); } }
+
+.dpsm {
+  position: fixed;
+  z-index: 61;
+  /* 宽度：一排数字最多五列（近10秒 / 总体 / 总伤 + 治疗两列），比原版宽约 45% */
+  width: max(2.75rem, 310px);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  font-size: max(0.13rem, 11px);
+  color: var(--dpsm-md);
+  /* 底衬加厚：0.88 的透明度下战场会透上来，字就糊了 */
+  background: rgba(7, 11, 10, 0.96);
+  border: 1px solid #46504c;
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  user-select: none;
+}
+/* 关窗只是藏起来：组件不卸载，这一局的 history / 采样 / 回合状态都留着（否则关窗再开会丢统计） */
+.dpsm.is-hidden { display: none; }
+.dpsm-head {
+  display: flex;
+  align-items: center;
+  gap: 0.06rem;
+  padding: max(0.04rem, 3px) max(0.06rem, 4px);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--line, #2c3532);
+  cursor: move;
+}
+.dpsm-title { font-weight: 700; color: var(--dpsm-hi); white-space: nowrap; }
+.dpsm-scope { display: flex; margin-left: auto; }
+.dpsm-scope button {
+  font: inherit;
+  font-size: max(0.12rem, 10px);
+  color: var(--dpsm-md);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line-2, #3a4340);
+  border-right-width: 0;
+  padding: 1px max(0.05rem, 5px);
+  cursor: pointer;
+}
+.dpsm-scope button:last-child { border-right-width: 1px; }
+.dpsm-scope button.is-on { color: #0d1512; background: var(--mint-400, #4ed8af); font-weight: 700; }
+.dpsm-x {
+  font: inherit;
+  font-size: max(0.16rem, 13px);
+  line-height: 1;
+  color: var(--dpsm-md);
+  background: transparent;
+  border: 0;
+  padding: 0 max(0.04rem, 3px);
+  cursor: pointer;
+}
+.dpsm-x:hover { color: #ff8888; }
+.dpsm-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.04rem;
+  padding: max(0.03rem, 3px) max(0.06rem, 5px);
+  font-size: max(0.11rem, 9px);
+  color: var(--dpsm-lo);
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line, #2c3532);
+}
+.dpsm-legend__labels { display: flex; align-items: center; gap: 0.04rem; margin-left: auto; min-width: 0; }
+.dpsm-legend .dpsm-heal { color: var(--mint-400, #4ed8af); }
+/* 治疗列：表头那个只读勾选框（放在标题行，和「当前战场 / 全部战场」同一排） */
+.dpsm-healbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: max(0.1rem, 9px);
+  color: var(--mint-400, #4ed8af);
+  white-space: nowrap;
+}
+.dpsm-healbox input { width: 10px; height: 10px; margin: 0; accent-color: var(--mint-400, #4ed8af); }
+.dpsm-list { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.dpsm-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.05rem;
+  padding: max(0.03rem, 2px) max(0.06rem, 5px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.dpsm-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--mint-500, #35b98f), rgba(78, 216, 175, 0.2));
+  pointer-events: none;
+}
+.dpsm-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dpsm-gold { display: inline-block; width: 5px; height: 5px; margin-left: 3px; background: #ffc600; border-radius: 50%; vertical-align: middle; }
+.dpsm-nums { flex: 0 0 auto; display: flex; align-items: baseline; gap: 0.03rem; font-family: var(--font-num, monospace); }
+.dpsm-recent { color: var(--dpsm-hi); }
+.dpsm-total { color: var(--dpsm-md); font-weight: 400; }
+/* 总伤：跟在「总体 DPS」后面，用折线图里伤害那条线的颜色，和 DPS 区分开 */
+.dpsm-dmg { color: #ffa380; margin-left: 0.06rem; }
+.dpsm-dmg-label { color: #ffa380; margin-left: 0.06rem; }
+.dpsm-sep { color: var(--dpsm-lo); }
+.dpsm-heal { color: #63e7c1; margin-left: 0.05rem; }
+/* 治疗的第二列（该干员本场治疗总量）——近 10 秒的排在前，总量略暗但保持可读 */
+.dpsm-heal--sum { color: #46c9a6; font-weight: 400; }
+.dpsm-empty { margin: 0; padding: max(0.08rem, 6px); color: var(--dpsm-md); }
+
+/* ---- 每回合历史（折叠复盘）---- */
+.dpsm-hist { border-top: 1px solid var(--line-2, #3a4340); max-height: 34vh; overflow: auto; }
+.dpsm-hist__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: max(0.03rem, 3px) max(0.06rem, 5px);
+  font-size: max(0.11rem, 9px);
+  color: var(--dpsm-md);
+  letter-spacing: 0.06em;
+  background: rgba(255, 255, 255, 0.05);
+}
+.dpsm-hist__n { color: var(--mint-400, #4ed8af); }
+.dpsm-round + .dpsm-round { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.dpsm-round__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  font: inherit;
+  font-size: max(0.12rem, 10px);
+  color: var(--dpsm-md);
+  background: transparent;
+  border: 0;
+  padding: max(0.03rem, 3px) max(0.06rem, 5px);
+  text-align: left;
+  cursor: pointer;
+}
+.dpsm-round__head:hover { background: rgba(255, 255, 255, 0.07); }
+.dpsm-round__caret { color: var(--mint-400, #4ed8af); width: 10px; flex: 0 0 auto; }
+.dpsm-round__label { flex: 0 0 auto; }
+.dpsm-round__sum { margin-left: auto; font-family: var(--font-num, monospace); color: var(--dpsm-lo); }
+.dpsm-list--round { background: rgba(0, 0, 0, 0.18); }

@@ -84,6 +84,18 @@ export default [
     rules,
   },
   {
+    // Optional plugins (plugins/<id>/): browser ES modules loaded by public/js/plugins.js, so they get the
+    // browser globals and the same rules. Without a matching block flat config enables NOTHING for them
+    // (which is how a missing import shipped: `no-undef` is the rule that catches it).
+    files: ['plugins/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: { ...globals.browser, process: 'readonly' },
+    },
+    rules,
+  },
+  {
     // The sim runs in every player's browser and on the server, and must give the same bits everywhere. ECMA-262
     // leaves these Math functions (and **) implementation-approximated: engines differ in the last bits.
     files: ['server/sim/**/*.js'],
