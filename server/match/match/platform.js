@@ -219,6 +219,39 @@ export class MatchPlatform {
     else if (phase === PHASE.PREP) this.maybeEndPrep();
   }
 
+  /**
+   * 调试 (SP_DEV=1): 点一下扣自己的目标生命值（默认 1），用来把一局快速推到结算 —— 验收战后统计、曲线这类
+   * 东西时不必真的打完四回合。LP 归零时照「中途退出」那条淘汰路径办（淘汰 → 复盘配对/跟随 → 场上没活人了
+   * 就直接 `finish`），所以点几下就能拿到结算与对局记录。普通启动里这条意图不存在（server/match/Match.js
+   * 的 devGold 开关）。
+   * @param {any} ps the caller's PlayerState
+   * @param {number} [n] how much LP to lose (default 1, clamped 1..99)
+   */
+  devLp(ps, n = 1) {
+    if (!ps || !ps.alive) return { ok: false, lp: 0 };
+    const loss = Number.isFinite(n) ? Math.max(1, Math.min(99, Math.trunc(n))) : 1;
+    const before = Math.max(0, Number(ps.lp) || 0);
+    ps.lp = Math.max(0, before - loss);
+    ps.stats.lpLost += before - ps.lp;
+    if (ps.lp > 0) { this.markPublic(); return { ok: true, lp: ps.lp, eliminated: false }; }
+    ps.eliminate(this.round);
+    this.tickerText(msg('{name}博士的目标生命值已耗尽', { name: ps.name }), FLOW_TICKER_PRIORITY);
+    if (this.bossWaves && (this.phase === PHASE.ROUND_START || this.phase === PHASE.SP_DRAFT || this.phase === PHASE.PREP)) {
+      this._planBossWaves();
+      for (const p of this.alivePlayers()) p.recompute();
+    }
+    for (const v of this._viewers()) if (this.watchers.get(v.playerId) === `n:${ps.playerId}`) this._followScout(v);
+    this.markPublic();
+    if (this.teamLp != null) this._syncTeamLp();
+    if (!this.alivePlayers().length) {
+      this.finish({ victory: false, reason: 'eliminated' });
+      return { ok: true, lp: 0, eliminated: true, finished: true };
+    }
+    if (this.phase === PHASE.SP_DRAFT && this.sp && this.spTurn() === ps.playerId) this.startSpTurn();
+    else if (this.phase === PHASE.PREP) this.maybeEndPrep();
+    return { ok: true, lp: 0, eliminated: true };
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;

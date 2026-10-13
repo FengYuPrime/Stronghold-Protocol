@@ -462,6 +462,9 @@ export const C2S = {
   // 调试 (SP_DEV=1)：白给资金，方便逐个找干员试皮肤。开关关着时服务端直接拒（server/match/match/intents.js），
   // 客户端也拿不到这个按钮（m.private.dev）。
   'g.devGold': { n: (v) => isInt(v, 1, 100000), $optional: ['n'] },
+  // 调试 (SP_DEV=1)：扣自己的 LP（默认 1），把一局快速推到结算 —— 验收战后统计/曲线时不用真打完四回合。
+  // 与 g.devGold 同一开关；服务端没开 dev 模式时直接拒（server/match/match/intents.js），按钮也不会出现。
+  'g.devLp': { n: (v) => isInt(v, 1, 99), $optional: ['n'] },
   'g.emote': { id: (v) => EMOTES.includes(v) },
   // playerId: the player tapped in the team panel (a 联防 / boss pair field shows two) — what an eliminated viewer or a
   // spectator seat follows from then on (Match.watchPref; community report of 2026-10-06, item 56)

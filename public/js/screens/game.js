@@ -789,6 +789,13 @@ function MatchScreen() {
       .then(() => toast(t('调试：+999 资金'), 'info', { ttl: 1200 }))
       .catch((err) => toast(t('调试失败：{code}', { code: String((err && err.code) || err) }), 'warn'));
   }, []);
+  // 调试 (SP_DEV=1)：顶栏的「-1 LP」按钮 —— 点一下扣自己 1 点目标生命值（Shift 一起按住扣 99），
+  // 用来把一局快速推到结算（验收战后统计/曲线时不用真打完四回合）。LP 归零就淘汰，场上没活人就结束。
+  const devLpHandler = useCallback((n = 1) => {
+    net.request('g.devLp', { n })
+      .then((res) => toast(`LP ${res && res.lp != null ? res.lp : '?'}`, 'info', { ttl: 1200 }))
+      .catch((err) => toast(t('调试失败：{code}', { code: String((err && err.code) || err) }), 'warn'));
+  }, []);
   // 准备 with funds left asks first: the prep's end wipes them (community report #4; not 坎诺特, not at 0 funds, not
   // under AI 托管 — gameLogic.readyFundsPrompt). The button and Space both come here.
   const askingReady = useRef(false);
@@ -1452,7 +1459,7 @@ function MatchScreen() {
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator}
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator}
-        onDevGold=${devGoldHandler} />
+        onDevGold=${devGoldHandler} onDevLp=${devLpHandler} />
 
       <div class="gm__bonds">
         <button type="button" class="bonds-toggle" aria-expanded=${!bondsCollapsed} aria-controls="match-bond-strip"

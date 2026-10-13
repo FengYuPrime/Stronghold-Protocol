@@ -359,7 +359,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  */
 export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, onDevGold = null }) {
+  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, onDevGold = null, onDevLp = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
   const lp = boss && Number.isFinite(pub?.teamLp) ? pub.teamLp : Number.isFinite(priv?.lp) ? priv.lp : null;
@@ -391,6 +391,8 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         </div>
         ${pub?.difficulty ? html`<${DifficultyTag} difficulty=${pub.difficulty} size="sm" />` : null}
         ${priv?.dev && onDevGold ? html`<button type="button" class="gtop__dev" data-testid="dev-gold" title=${t('开发调试：+999 资金')} onClick=${onDevGold}>${t('+999 资金')}</button>` : null}
+        ${/* 调试 (SP_DEV=1)：点一下扣自己 1 点目标生命值（按住 Shift 扣 99），用来把一局快速推到结算。 */ null}
+        ${priv?.dev && onDevLp ? html`<button type="button" class="gtop__dev" data-testid="dev-lp" title="dev: -1 LP (Shift: -99)" onClick=${(e) => onDevLp(e && e.shiftKey ? 99 : 1)}>-1 LP</button>` : null}
       </div>
     </div>
 

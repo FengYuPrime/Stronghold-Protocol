@@ -41,6 +41,8 @@ export class MatchIntents {
       case 'g.ready': return ps.setReady(!!msg.ready);
       // 调试 (SP_DEV=1 / 起服时的 devGold)：白给 999 资金，方便找干员试皮肤。开关关着时这条命令不存在。
       case 'g.devGold': return this.devGold ? ps.devGold(msg.n) : fail(ERR.BAD_MSG, 'dev mode is off');
+      // 调试 (SP_DEV=1)：扣自己的 LP（默认 1），把一局快速推到结算，用来验收战后统计/曲线。同样受开关约束。
+      case 'g.devLp': return this.devGold ? this.devLp(ps, msg.n) : fail(ERR.BAD_MSG, 'dev mode is off');
       case 'g.emote': return this.emote(ps, msg.id);
       // playerId: the player tapped (a shared field names two) — the watch preference (item 56)
       case 'g.watch': return this.watch(ps, msg.fieldId, msg.playerId ?? null);
