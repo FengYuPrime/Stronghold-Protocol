@@ -475,6 +475,14 @@
 /* 0.2.2: an owned pick's 潜能 / 练度 (screens/cultivation.js) — a prototype has neither (a dim line instead) */
 .diy-slot__cult { display: block; margin-top: .03rem; font-size: max(calc(.12 * var(--t)), 9px); }
 .diy-slot__cult .lo-cult { max-width: max(2.6rem, 200px); }
+/* 换装（干员皮肤）在自选编队槽位里：与干员调配共用 SkinSection，这里把它压紧并限高，免得一个槽位拉得太长 */
+.diy-slot__skin { display: block; margin-top: .04rem; }
+.diy-slot__skin .lo-sec--skin { margin: 0; padding: 0; border: 0; background: none; }
+.diy-slot__skin .lo-sec__head { margin-bottom: .03rem; }
+.diy-slot__skin .lo-sec__head h3 { font-size: max(calc(.12 * var(--t)), 9px); }
+.diy-slot__skin .lo-sec__note, .diy-slot__skin .lo-skin__hint { display: none; }
+.diy-slot__skin .lo-skins { max-height: max(1.6rem, 132px); overflow-y: auto; }
+.diy-slot__skin .lo-skin { padding: .02rem; }
 .diy-slot__bad { display: flex; align-items: center; gap: .04rem; margin: .02rem 0 0; font-size: max(calc(.12 * var(--t)), 9px); color: var(--amber); }
 .diy-slot.is-bad { border-color: rgba(255, 196, 0, .45); }
 .diy-tag { display: inline-flex; align-items: center; height: 1.5em; padding: 0 .4em; font-size: max(calc(.11 * var(--t)), 8px); font-weight: 700; border-radius: 1em; white-space: nowrap; }

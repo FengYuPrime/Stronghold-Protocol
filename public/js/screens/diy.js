@@ -19,6 +19,7 @@ import { diySlotList, pickChoices, pickOptions, slotRecord, defaultPick } from '
 import { OperatorVoice } from '../ui/operatorVoice.js';
 import { LoadoutStats } from '../ui/loadoutStats.js';
 import { CultivationSelects } from './cultivation.js';
+import { SkinSection } from '../ui/skinPicker.js';
 import { t } from '../../../shared/i18n.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
@@ -80,6 +81,12 @@ function SlotCard({ m, slot, pick, illegal, onOpen, onClear, ops = {}, onOps = n
       ${proto ? html`<small class="diy-slot__cult t-dim">${t('原型干员没有潜能与练度')}</small>`
         : onOps ? html`<span class="diy-slot__cult"><${CultivationSelects} charId=${rec.charId} ops=${ops} onSet=${onOps} /></span>` : null}
       <${OperatorVoice} charId=${rec.charId} />
+      ${/* 换装（干员皮肤）：自选编队的槽位也要能选皮肤。
+             键用 pick.charId 而不是槽位的 chessId —— 对局内自选棋子的模型走 render/app.js 的
+             `skinFor(pick.charId)` 兜底，所以只有存在 charId 下，这一格选的皮肤才会真的穿上。*/ ''}
+      <div class="diy-slot__skin">
+        <${SkinSection} chess=${{ chessId: pick.charId, charId: pick.charId }} />
+      </div>
       ${illegal ? html`<p class="diy-slot__bad"><${Icon} name="warn" />${t('这项自选在当前版本不可用，开局时会被移除')}</p>` : null}
     </div>
     <div class="diy-slot__acts">

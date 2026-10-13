@@ -692,7 +692,7 @@ export async function createFieldView(host, options = {}) {
     // the piece / the 自选 slot's operator (the owner's own board is built from m.private, which carries no skin,
     // so without this the player would not see their own outfit)
     const skin = piece.skin ?? skinFor(chess?.baseId || piece.id) ?? skinFor(piece.id) ?? (pick ? skinFor(pick.charId) : null) ?? null;
-    if (globalThis.__SP_DEBUG_SKINS__) console.info('[skins] 备战棋子', piece.id, '→ skin', skin, '(服务端视图', piece.skin, '| 本地', skinFor(chess?.baseId || piece.id), ')');
+    if (globalThis.__SP_DEBUG_SKINS__ === true) console.info('[skins] 备战棋子', piece.id, '→ skin', skin, '(服务端视图', piece.skin, '| 本地', skinFor(chess?.baseId || piece.id), ')');
     return {
       kind: 'op', side: 'ally', defId: piece.id,
       spine: rec?.assets?.spine || rec?.charId || null, avatar: rec?.assets?.avatar || rec?.charId || null,
@@ -1370,11 +1370,15 @@ export async function createFieldView(host, options = {}) {
   /**
    * A live unit of a battle on screen (UnitInfo) with this browser's 换装 choice filled in — a piece already deployed
    * when the player picks an outfit would otherwise keep its own model until it floats off and comes back.
+   *
+   * 键有两套：普通棋子的换装按**棋子 id**存（干员调配页），自选编队的按**干员 charId** 存（自选编队页只认干员，
+   * 见 screens/diy.js）—— 所以自选棋子要先通过 m.private.diy 找到它填的那个干员，再查一次。
    */
   function liveInfo(u) {
     const info = addInfo(u);
     if (!info || info.kind !== 'op' || info.side !== 'ally' || info.skin) return info;
-    const skin = skinFor(info.defId);
+    const pick = info.defId ? diyPicks[info.defId] : null;
+    const skin = skinFor(info.defId) || (pick ? skinFor(pick.charId) : null);
     if (!skin) return info;
     return { ...info, skin };
   }

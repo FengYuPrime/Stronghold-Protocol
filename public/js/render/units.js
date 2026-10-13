@@ -626,7 +626,7 @@ export class UnitView {
   _loadSpine(retry = false) {
     const a = this.ctx.assets;
     if (!a || !a.spineEntry || !a.spine) {
-      if (globalThis.__SP_DEBUG_SKINS__ && this.info.skin) console.warn('[skins] _loadSpine 跳过了', this.info.defId, 'skin=', this.info.skin, '（assets/spine 未就绪）');
+      if (globalThis.__SP_DEBUG_SKINS__ === true && this.info.skin) console.warn('[skins] _loadSpine 跳过了', this.info.defId, 'skin=', this.info.skin, '（assets/spine 未就绪）');
       return;
     }
     const id = this.info.spine || this.info.defId;
@@ -636,7 +636,7 @@ export class UnitView {
     // 换装: the owner's chosen outfit (assets.js spineEntry resolves chars[id].skins[skinId].spine, with the operator's
     // own model as `fallback` when the skin's files are missing or fail to load)
     const entry = id ? a.spineEntry(id, { back, skin: this.info.skin }) : null;
-    if (globalThis.__SP_DEBUG_SKINS__) console.info('[skins] _loadSpine', this.info.defId, 'skin=', this.info.skin, 'back=', back, '→', entry ? entry.skel : '(无模型)');
+    if (globalThis.__SP_DEBUG_SKINS__ === true) console.info('[skins] _loadSpine', this.info.defId, 'skin=', this.info.skin, 'back=', back, '→', entry ? entry.skel : '(无模型)');
     if (!entry || this.ctx.settings?.quality === 'low' && this.isEnemy && !this.isBoss && this.ctx.crowded?.()) return;
     this.entryBack = back;
     this._acquireSpine(entry, id, retry);
@@ -686,13 +686,9 @@ export class UnitView {
         actor.clipPerAttack = this.isEnemy;
       } catch (err) {
         console.warn('[render] spine build failed', id, err?.message || err);
-        if (globalThis.__SP_DEBUG_SKINS__) console.warn('[skins] SpineActor 构建失败（保留旧模型）', id, 'skin=', this.info.skin, err?.message || err);
+        if (globalThis.__SP_DEBUG_SKINS__ === true) console.warn('[skins] SpineActor 构建失败（保留旧模型）', id, 'skin=', this.info.skin, err?.message || err);
         this._releaseEntry(entry);
         return;
-      }
-      if (globalThis.__SP_DEBUG_SKINS__) {
-        const names = (data && data.animations ? data.animations : []).map((a) => a && a.name).filter(Boolean);
-        console.info('[skins] 模型已换上', id, 'skin=', this.info.skin, '| 动作', names.slice(0, 10).join(','), '| 替换旧模型:', !!this.actor);
       }
       // a Front ⇄ Back swap (setDir, or knocked out / standing again: _syncModel) replaces the previous model in place:
       // no fallback diamond in between; a deploy clip it was playing goes on on the new model (an operator facing UP
@@ -729,7 +725,7 @@ export class UnitView {
       if (req === this._spineReq) { this._spineBusy = false; this._stuckAt = 0; }
       this._releaseEntry(entry);
       if (this.destroyed || req !== this._spineReq) return;
-      if (globalThis.__SP_DEBUG_SKINS__) console.warn('[skins] 模型加载失败', id, 'skin=', this.info.skin, '→ 回退:', entry.fallback ? (entry.fallback.skel || '(有回退)') : '(无回退)');
+      if (globalThis.__SP_DEBUG_SKINS__ === true) console.warn('[skins] 模型加载失败', id, 'skin=', this.info.skin, '→ 回退:', entry.fallback ? (entry.fallback.skel || '(有回退)') : '(无回退)');
       if (entry.fallback) { this._acquireSpine(entry.fallback, id, retry); return; }
       // keep the fallback diamond (or the model already shown: a failed Front ⇄ Back swap) — and try again later
       if (!this.actor && this._spineTries < SPINE_RETRY_MS.length) this._retryAt = nowMs() + SPINE_RETRY_MS[this._spineTries++];
