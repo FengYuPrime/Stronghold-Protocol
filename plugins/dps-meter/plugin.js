@@ -23,6 +23,47 @@ export const VERSION = '1.2.0';
 const MAX_ROUNDS_KEPT = 12;
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
+
+/**
+ * 名字最多 `max` 个字符（按码位切，中文/emoji 都算一个）；超长时最后一位换成省略号。
+ * 回合标签的位置有限，队友名太长会把「第 N 回合」挤掉。
+ */
+function capName(name, max = 5) {
+  const s = typeof name === 'string' ? name : '';
+  const chars = [...s];
+  if (chars.length <= max) return s;
+  return chars.slice(0, Math.max(1, max - 1)).join('') + '…';
+}
+
+/** 本机玩家 id（`store.me.playerId`）；读不到就 null，那时无法区分归属（按「都不是队友」处理）。 */
+function myPlayerId(api) {
+  try { const v = api?.store?.get?.()?.me?.playerId; return typeof v === 'string' && v ? v : null; } catch { return null; }
+}
+
+/** 战场 id → 所属玩家：`n:p_xxx` 是某个人的半边；`u`（联防）是多人的，返回 null。 */
+function ownerOfField(fieldId) {
+  const fid = String(fieldId || '');
+  return fid.startsWith('n:') ? fid.slice(2) : null;
+}
+
+/** 公开视图里的 playerId → 显示名（多人模式下给「第 X 回合」署名用）。 */
+function playerNames(api) {
+  const map = new Map();
+  try {
+    const ps = api?.store?.get?.()?.match?.public?.players;
+    for (const p of Array.isArray(ps) ? ps : []) if (p && typeof p.playerId === 'string') map.set(p.playerId, p.name || p.playerId);
+  } catch { /* no store yet */ }
+  return map;
+}
+
+/** 是不是「有别的真人」的多人局：单人（或只有我一个真人的房间）不署名，免得噪声。 */
+function hasOtherHumans(api) {
+  try {
+    const ps = api?.store?.get?.()?.match?.public?.players;
+    const humans = (Array.isArray(ps) ? ps : []).filter((p) => p && !p.isBot);
+    return humans.length > 1;
+  } catch { return false; }
+}
 /** 数字一律整数显示（fmtInt 在 dps-core，有单测）。 */
 const fmt = fmtInt;
 
@@ -49,13 +90,14 @@ function Row({ r, t, heal = false }) {
  * Store one finished round (its last sampled numbers) — the collapse list under the live table.
  * @param {{ label: string, round?: number|null, t?: number, dmg?: number, heal?: number }[]} history newest first
  * @param {string} label @param {any[]} rows the last ranked rows of that round
- * @param {{ time?: number, round?: number|null }} meta battle clock when it was archived (seconds) + the game's round
+ * @param {{ time?: number, round?: number|null, unite?: boolean }} meta battle clock when it was archived (seconds),
+ *   the game's round and whether this was the 协防 phase (its own entry — same round number, different phase)
  */
 function archiveRound(history, label, rows, meta = {}) {
   if (!rows.length) return history;
   let dmg = 0; let heal = 0;
   for (const r of rows) { dmg += r.dmg || 0; heal += r.heal || 0; }
-  const next = [{ label, at: Date.now(), time: meta.time || 0, round: meta.round ?? null, dmg, heal, rows: rows.map((r) => ({ ...r })) }, ...history];
+  const next = [{ label, at: Date.now(), time: meta.time || 0, round: meta.round ?? null, unite: !!meta.unite, dmg, heal, rows: rows.map((r) => ({ ...r })) }, ...history];
   return next.slice(0, MAX_ROUNDS_KEPT);
 }
 
@@ -72,7 +114,11 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
   const [rows, setRows] = useState([]);
   const [history, setHistory] = useState([]);   // [{ label, at, rows }] 最近的在前
   const [openRound, setOpenRound] = useState(0); // 展开的历史轮次（下标）；-1 = 全部折叠
-  const [scope, setScope] = useState('field'); // 'field' 当前战场 | 'all' 全部战场
+  const [mine, setMine] = useState(false);
+  const [meId, setMeId] = useState(null);
+  const meRef = useRef(null);
+  const primaryOwnerRef = useRef(null);   // 正在统计的那个战场属于谁（署名用）
+  const primaryKindRef = useRef(null);    // 那个战场的类型（'normal' | 'unite' 协防 …；标注用）
   const [pos, setPos] = useState(() => {
     try { return JSON.parse(globalThis.localStorage?.getItem('sp.dpsMeter.pos') || 'null') || { left: 18, bottom: 92 }; } catch { return { left: 18, bottom: 92 }; }
   });
@@ -96,18 +142,32 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
       rec.archived = true;
       const rows = rec.last;
       const n = rec.round ?? rec.n;
-      setHistory((h) => archiveRound(h, api.t('第 {n} 回合', { n }), rows, { time: rec.time || 0, round: rec.round ?? null }));
-      if (globalThis.__SP_DEBUG_PLUGINS__) console.info('[plugin:dps-meter] 归档回合', n, rows.length, '人');
+      // 署名：谁打的这段就写谁的名字，放在**回合号前面**（`队友甲 · 第 3 回合`）。
+      //   · 不是我的战场（观战队友 / bot 队友）→ 一定署名（不要求「有别的真人」，否则 1 真人 + bot 的房间会漏）；
+      //   · 是我自己的战场 → 只在真有别的真人时才写上我的名字（单人局不写，免得噪声）。
+      const names = playerNames(api);
+      const owner = primaryOwnerRef.current || (rows[0] && rows[0].ownerId) || null;
+      const meNow = myPlayerId(api);
+      const notMine = !!owner && !!meNow && owner !== meNow;
+      // 名字最多 5 个字符（本来标题就只是提示归属，太长会把回合号挤掉）
+      const who = owner && (notMine || hasOtherHumans(api)) ? capName(names.get(owner), 5) : null;
+      // 协防阶段（`kind: 'unite'` / 联防战场 `u`）在同一回合里是**另一条**记录，必须标出来，
+      // 否则历史里会出现两条「第 3 回合」分不清哪条是协防。
+      const unite = primaryKindRef.current === 'unite' || (rows[0] && rows[0].field === 'u');
+      const label = (who ? `${who} · ` : '') + api.t('第 {n} 回合', { n }) + (unite ? ` · ${api.t('协防')}` : '');
+      setHistory((h) => archiveRound(h, label, rows, { time: rec.time || 0, round: rec.round ?? null, unite, owner }));
+      if (globalThis.__SP_DEBUG_PLUGINS__) console.info('[plugin:dps-meter] 归档回合', { round: n, owner, who, notMine, unite, rows: rows.length });
     };
 
     const tick = () => {
       if (!live) return;
-      const runner = api.runner;
+      const runner = runnerOf(api);
       if (!runner || typeof runner.fieldUnits !== 'function') {
         if (globalThis.__SP_DEBUG_PLUGINS__ && Date.now() - loggedAt > 2000) { loggedAt = Date.now(); console.warn('[plugin:dps-meter] runner 不可用', !!runner); }
         return;
       }
-      const fields = scope === 'all' ? allFieldIds(api) : [null];
+      // 只统计**屏幕上那一场**（原来还有个「全部战场」标签，被「只看我的」取代了：多战场合并本来也分不清归属）
+      const fields = [null];
       const all = [];
       let seen = false;
       let primary = null;      // 主战场（收尾以它为准，避免多战场各归一条重复记录）
@@ -120,6 +180,10 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
         const key = String(data.fieldId || 'field');
         if (!primary) {
           primary = key;
+          // 署名用：这一回合统计的是谁的战场（`n:p_xxx` → 那个玩家；联防 `u` → null，不署名）
+          primaryOwnerRef.current = ownerOfField(key);
+          // 协防阶段单独标注（同回合的第二条记录）
+          primaryKindRef.current = typeof data.kind === 'string' ? data.kind : null;
           primaryInfo = {
             bid: data.battleId == null ? null : String(data.battleId),
             done: data.done === true,
@@ -130,11 +194,15 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
         samplesRef.current.set(key, samples);
         for (const r of visibleRows(aggregate(samples, data.time))) all.push({ ...r, field: key });
       }
-      // 名次与横条都按**总伤**（需求方指定）：调用 rankRows 的默认口径，不再按近 10 秒 DPS
-      const ranked = seen ? rankRows(scope === 'all' ? mergeFields(all) : all) : [];
+      // 名次与横条都按**总伤**（需求方指定）：调用 rankRows 的默认口径，不再按近 10 秒 DPS。
+      // **采样不区分归属**：队友的行也照收（渲染时才按「只看我的」隐藏）—— 这样取消勾选立刻能看回来，
+      // 每回合归档也不会把队友的数据删掉（只是不显示）。
+      const ranked = seen ? rankRows(all) : [];
+      const myId = myPlayerId(api);
+      if (meRef.current !== myId) { meRef.current = myId; setMeId(myId); }
       if (globalThis.__SP_DEBUG_PLUGINS__ && Date.now() - loggedAt > 2000) {
         loggedAt = Date.now();
-        console.info('[plugin:dps-meter] 取样', { scope, fields, seen, rows: ranked.length, done: !!primaryInfo?.done, sample: ranked.slice(0, 3).map((r) => `${r.name} ${Math.round(r.recentDps)}/${Math.round(r.dps)}`) });
+        console.info('[plugin:dps-meter] 取样', { mine, myId, fields, seen, rows: ranked.length, done: !!primaryInfo?.done, sample: ranked.slice(0, 3).map((r) => `${r.name}${r.ownerId && r.ownerId !== myId ? '(队友)' : ''} ${Math.round(r.recentDps)}/${Math.round(r.dps)}`) });
       }
       if (!seen) setRows([]); else setRows(ranked);
 
@@ -145,14 +213,13 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
       if (!primaryInfo) return;      // 战斗不在数据里：只可能收尾，没有新数字可记
       const cur = roundRef.current;
       if (step.fresh) samplesRef.current.set(cur.key, []); // 新回合的窗口从零开始（否则近 10 秒会跨两场）
-      if (ranked.length) cur.last = ranked;
-      cur.time = Math.max(cur.time || 0, primaryInfo.time);
+      if (ranked.length) cur.last = ranked;      cur.time = Math.max(cur.time || 0, primaryInfo.time);
     };
     tick();
     const timer = setInterval(tick, SAMPLE_MS);
     const off = runnerHook(api, () => { samplesRef.current.clear(); tick(); });
     return () => { live = false; clearInterval(timer); off(); };
-  }, [scope]);
+  }, []);
 
   const startDrag = (e) => {
     const el = e.currentTarget.closest('.dpsm');
@@ -179,14 +246,19 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
 
   const heal = rows.some(showHeal) || history.some((h) => h.rows.some(showHeal));
   const style = pos.left != null ? `left:${pos.left}px;top:${pos.top}px` : `right:${pos.right}px;bottom:${pos.bottom}px`;
+  // 「只看我的」= 只**隐藏**队友的行（数据照采样、照归档，取消勾选立刻回来；归档里也不删）
+  const keepMine = (r) => !mine || !meId || !r.ownerId || r.ownerId === meId;
+  const shownRows = rows.filter(keepMine);
+  const shownHistory = history
+    .map((h) => ({ ...h, shown: h.rows.filter(keepMine) }))
+    .filter((h) => h.shown.length);
   return html`<section class=${cx('dpsm', hidden && 'is-hidden')} style=${style} data-testid="dps-meter">
     <header class="dpsm-head" onPointerDown=${startDrag}>
       <span class="dpsm-title">${api.t('战斗统计')}</span>
-      <div class="dpsm-scope" role="tablist" aria-label=${api.t('统计范围')}>
-        <button type="button" role="tab" class=${cx(scope === 'field' && 'is-on')} onClick=${() => setScope('field')}>${api.t('当前战场')}</button>
-        <button type="button" role="tab" class=${cx(scope === 'all' && 'is-on')} onClick=${() => setScope('all')}>${api.t('全部战场')}</button>
-      </div>
       ${heal ? html`<label class="dpsm-healbox" title=${api.t('治疗')}><input type="checkbox" checked disabled />${api.t('治疗')}</label>` : null}
+      ${/* 「只看我的」：勾上只**隐藏**队友的行（数据照收、照归档，取消勾选立刻回来）。
+              它取代了原来的「当前战场 / 全部战场」两个标签 —— 多战场合并本来也分不清归属。 */ null}
+      <label class="dpsm-healbox" title=${api.t('只看我的干员：观战队友时不把队友的输出算进来')}><input type="checkbox" checked=${mine} onChange=${(e) => setMine(!!(e.target && e.target.checked))} />${api.t('只看我的')}</label>
       <button type="button" class="dpsm-x" title=${api.t('关闭')} onClick=${onClose}>×</button>
     </header>
     <div class="dpsm-legend">
@@ -196,20 +268,20 @@ export function DpsPanel({ api, onClose, hint = '', hidden = false }) {
         ${heal ? html`<span class="dpsm-heal" title=${api.t('治疗')}>${api.t('治疗')}</span>` : null}
       </span>
     </div>
-    ${rows.length
-      ? html`<ul class="dpsm-list">${rows.slice(0, 20).map((r) => html`<${Row} key=${`${r.field}|${r.key}`} r=${r} t=${api.t} heal=${heal} />`)}</ul>`
-      : html`<p class="dpsm-empty">${hint || api.t('本场还没有伤害数据')}</p>`}
-    ${history.length ? html`<div class="dpsm-hist">
-      <div class="dpsm-hist__title">${api.t('历史回合')}<span class="dpsm-hist__n">${history.length}</span></div>
-      ${history.map((h, i) => html`<div class="dpsm-round" key=${h.at}>
+    ${shownRows.length
+      ? html`<ul class="dpsm-list">${shownRows.slice(0, 20).map((r) => html`<${Row} key=${`${r.field}|${r.key}`} r=${r} t=${api.t} heal=${heal} />`)}</ul>`
+      : html`<p class="dpsm-empty">${hint || (mine && rows.length ? api.t('只显示你自己的干员（取消勾选可看队友）') : api.t('本场还没有伤害数据'))}</p>`}
+    ${shownHistory.length ? html`<div class="dpsm-hist">
+      <div class="dpsm-hist__title">${api.t('历史回合')}<span class="dpsm-hist__n">${shownHistory.length}</span></div>
+      ${shownHistory.map((h, i) => html`<div class="dpsm-round" key=${h.at}>
         <button type="button" class="dpsm-round__head" aria-expanded=${openRound === i ? 'true' : 'false'}
           onClick=${() => setOpenRound((v) => (v === i ? -1 : i))}>
           <span class="dpsm-round__caret">${openRound === i ? '▾' : '▸'}</span>
-          <span class="dpsm-round__label">${h.label}</span>
-          <span class="dpsm-round__sum">${sumLine(h.rows, heal)}</span>
+          <span class=${cx('dpsm-round__label', h.unite && 'dpsm-round__label--unite')}>${h.label}</span>
+          <span class="dpsm-round__sum">${sumLine(h.shown, heal)}</span>
         </button>
         ${openRound === i ? html`<ul class="dpsm-list dpsm-list--round">
-          ${h.rows.map((r) => html`<${Row} key=${`${h.at}|${r.key}`} r=${r} t=${api.t} heal=${heal} />`)}
+          ${h.shown.map((r) => html`<${Row} key=${`${h.at}|${r.key}`} r=${r} t=${api.t} heal=${heal} />`)}
         </ul>` : null}
       </div>`)}
     </div>` : null}
@@ -247,7 +319,7 @@ function Toggle({ api }) {
   // 这是这个按钮之前完全不出现的根因。
   useEffect(() => {
     const probe = () => {
-      const runner = api.runner;
+      const runner = runnerOf(api);
       if (!runner) { setHint('runner 未就绪'); setLive(false); return; }
       if (typeof runner.fieldUnits !== 'function') { setHint('runner 没有 fieldUnits（旧版本？）'); setLive(false); return; }
       let on = false;
@@ -325,7 +397,7 @@ function Toggle({ api }) {
 
   // 战斗中才出现在战斗界面之外不打扰玩家；但只要面板是打开的（或 runner 存在）就保留按钮，
   // 这样「按钮不出现」永远能通过点击进一步排查，而不是只有沉默。
-  if (!live && !open && !api.runner) return null;
+  if (!live && !open && !runnerOf(api)) return null;
   const btnStyle = btnPos.left != null ? `left:${btnPos.left}px;top:${btnPos.top}px` : `left:${btnPos.left ?? 14}px;bottom:${btnPos.bottom ?? 106}px`;
   return html`<${Fragment}>
     <button type="button" class=${cx('dpsm-toggle', open && 'is-on', live && 'is-live')} title=${api.t('战斗统计')}
@@ -353,27 +425,17 @@ export default function register(api) {
 
 /** The runner's own `field` event, defensively: the plugin must work on a runner without it. */
 function runnerHook(api, fn) {
-  try { return api.runner?.on?.('field', fn) || (() => {}); } catch { return () => {}; }
+  try { return runnerOf(api)?.on?.('field', fn) || (() => {}); } catch { return () => {}; }
 }
 
-/** Every fieldId this client currently holds a battle for (battleRunner keeps one entry per field). */
-function allFieldIds(api) {
-  try {
-    const entries = api.runner?._entries;
-    return entries && typeof entries.keys === 'function' ? [...entries.keys()] : [];
-  } catch { return []; }
+/**
+ * 取样用的 runner：先问宿主（api.runner），拿不到就退回全局 __SP_RUNNER__。
+ * 宿主那个 getter 一旦为 null，取样循环会每帧直接返回 —— 整局都没有数据（用户报的「战后统计不更新」）。
+ */
+function runnerOf(api) {
+  try { return (api && api.runner) || globalThis.__SP_RUNNER__ || null; } catch { return null; }
 }
 
-/** 全部战场：同一 operator 的同一单位 uid 在四个战场里分别存在，合并为一行（队友的算在队友名下）。 */
-function mergeFields(rows) {
-  const byKey = new Map();
-  for (const r of rows) {
-    const key = `${r.defId}#${r.unitId == null ? r.name : r.unitId}`;
-    const cur = byKey.get(key);
-    if (!cur) { byKey.set(key, { ...r }); continue; }
-    cur.dmg += r.dmg; cur.heal += r.heal; cur.attacks += r.attacks; cur.kills += r.kills;
-    cur.dps += r.dps; cur.hps += r.hps; cur.recentDps += r.recentDps; cur.recentHps += r.recentHps;
-    cur.share = Math.max(cur.share, r.share);
-  }
-  return [...byKey.values()];
-}
+// （原来还有 allFieldIds() / mergeFields()：给「全部战场」标签合并多个战场的行用。那个标签已被
+//   「只看我的」取代 —— 多战场合并本来也分不清归属，留着只会让人把队友的数字当成自己的。）
+

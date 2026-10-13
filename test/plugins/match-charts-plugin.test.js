@@ -11,6 +11,65 @@ const PLUGIN = 'plugins/match-charts';
 const DEPS = ['chart.js', 'charts-core.js'];
 const src = (f) => fs.readFileSync(path.join(ROOT, PLUGIN, f), 'utf8');
 
+/**
+ * 一台假 runner：`on('field')` 收集回调，测试自己按「帧」推进（插件每 SAMPLE_MS 也会自己 tick，
+ * 但测试里用 field 事件驱动更可控）。
+ * @param {{ units?: any[] }} [o]
+ */
+function fakeRunner(o = {}) {
+  const hooks = [];
+  const state = { bid: 'b1', time: 0, done: false, units: o.units || [] };
+  return {
+    state,
+    fieldUnits: () => ({ battleId: state.bid, fieldId: 'f1', kind: 'normal', time: state.time, done: state.done, units: state.units }),
+    on: (type, fn) => { if (type === 'field') hooks.push(fn); return () => { const i = hooks.indexOf(fn); if (i >= 0) hooks.splice(i, 1); }; },
+    _entries: new Map([['f1', {}]]),
+    frame(patch) { Object.assign(state, patch); for (const fn of [...hooks]) fn(); },
+  };
+}
+
+/** 一帧的单位表：一名干员累计打了 dmg 点伤害。 */
+const unitsOf = (dmg) => [{ unitId: 1, defId: 'char_a', name: 'A', kind: 'op', dmg, heal: 0, attacks: 5, kills: 1, taken: 0 }];
+
+/** 模拟核心在结算时派发的落库事件。 */
+const recordEvent = (id, durationMs) => {
+  globalThis.dispatchEvent(new CustomEvent('sp:match-record', { detail: { id, difficulty: 'normal', roomMode: 'solo', victory: true, durationMs } }));
+};
+
+test('连打两把：第二把必须按新的 record 建档，不能停在第一把的数据上', async () => {
+  stubDom();
+  const entry = await loadModule(PLUGIN, 'plugin', DEPS);
+  const core = await loadModule(PLUGIN, 'charts-core', DEPS);
+  const api = stubApi({ id: 'match-charts' });
+  const runner = fakeRunner({ units: unitsOf(0) });
+  api.runner = runner;
+  const handle = entry.default(api);
+
+  // ---- 第一把：一回合打了 1000 ----
+  api.emit({ match: { public: { phase: 'INFO_CHECK', round: 1 }, result: null } });
+  runner.frame({ bid: 'b1', time: 10, done: false, units: unitsOf(1000) });
+  runner.frame({ bid: 'b2', time: 20, done: false, units: unitsOf(0) });      // 换场 → 收尾第 1 回合
+  recordEvent('r1.first', 60000);
+  const first = core.readMatch('r1.first');
+  assert.ok(first, '第一把要建档');
+  assert.equal(first.total.dmg, 1000);
+
+  // ---- 结算 → 再开一局（matchActive 的 false → true 跳变会清空窗口）----
+  api.emit({ match: { public: { phase: 'RESULT', round: 3 }, result: { victory: true } } });
+  api.emit({ match: { public: { phase: 'INFO_CHECK', round: 1 }, result: null } });
+
+  // ---- 第二把：一回合打了 7777 ----
+  runner.frame({ bid: 'c1', time: 12, done: false, units: unitsOf(7777) });
+  runner.frame({ bid: 'c2', time: 24, done: false, units: unitsOf(0) });
+  recordEvent('r1.second', 61000);
+
+  const second = core.readMatch('r1.second');
+  assert.ok(second, '第二把也要建档（这就是「图表没更新」的根因：这一条没写进去）');
+  assert.equal(second.total.dmg, 7777, '第二把的数值必须是第二把的');
+  assert.equal(core.newestMatch()?.id, 'r1.second', '「最近一局」要指向第二把');
+  handle.dispose();
+});
+
 test('插件清单合法，点名的文件都在', async () => {
   const { normalizePluginManifest, isPluginPath } = await import('../../server/plugins.js');
   const raw = JSON.parse(src('plugin.json'));

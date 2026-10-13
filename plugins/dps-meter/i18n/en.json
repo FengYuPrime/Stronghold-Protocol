@@ -11,5 +11,10 @@
   "历史回合": "Past rounds",
   "总伤害": "Total damage",
   "总治疗": "Total healing",
-  "总伤": "Damage"
+  "总伤": "Damage",
+  "队友": "Ally",
+  "只看我的": "Mine only",
+  "只看我的干员：观战队友时不把队友的输出算进来": "Only your own operators: while watching a teammate, their output is not counted",
+  "协防": "Co-op defense",
+  "只显示你自己的干员（取消勾选可看队友）": "Only your own operators are shown (untick to see teammates)"
 }

@@ -119,6 +119,8 @@ export function takeSample(units, time) {  const list = Array.isArray(units) ? u
     time: Number.isFinite(time) && time > 0 ? time : 0,
     units: list.map((u, i) => ({
       unitId: Number.isInteger(u && u.unitId) ? u.unitId : null,
+      // 归属玩家：观战队友的战场 / 联防共用战场时，同屏会有两个人的干员，必须带上才能分开统计
+      ownerId: (u && typeof u.ownerId === 'string') ? u.ownerId : null,
       defId: (u && (u.defId || u.name)) || `#${i}`,
       name: (u && (u.name || u.defId)) || `#${i}`,
       kind: (u && u.kind) || 'op',

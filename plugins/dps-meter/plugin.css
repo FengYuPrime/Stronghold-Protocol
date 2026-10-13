@@ -66,20 +66,9 @@
   cursor: move;
 }
 .dpsm-title { font-weight: 700; color: var(--dpsm-hi); white-space: nowrap; }
-.dpsm-scope { display: flex; margin-left: auto; }
-.dpsm-scope button {
-  font: inherit;
-  font-size: max(0.12rem, 10px);
-  color: var(--dpsm-md);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--line-2, #3a4340);
-  border-right-width: 0;
-  padding: 1px max(0.05rem, 5px);
-  cursor: pointer;
-}
-.dpsm-scope button:last-child { border-right-width: 1px; }
-.dpsm-scope button.is-on { color: #0d1512; background: var(--mint-400, #4ed8af); font-weight: 700; }
+/* 关门按钮永远贴右：原来靠 .dpsm-scope 的 margin-left:auto 顶开，那两个标签删掉后就得自己顶了 */
 .dpsm-x {
+  margin-left: auto;
   font: inherit;
   font-size: max(0.16rem, 13px);
   line-height: 1;
@@ -174,5 +163,7 @@
 .dpsm-round__head:hover { background: rgba(255, 255, 255, 0.07); }
 .dpsm-round__caret { color: var(--mint-400, #4ed8af); width: 10px; flex: 0 0 auto; }
 .dpsm-round__label { flex: 0 0 auto; }
+/* 协防阶段是同一回合里的第二条记录：给个高亮色，和普通回合一眼分开 */
+.dpsm-round__label--unite { color: var(--amber, #f0b429); }
 .dpsm-round__sum { margin-left: auto; font-family: var(--font-num, monospace); color: var(--dpsm-lo); }
 .dpsm-list--round { background: rgba(0, 0, 0, 0.18); }

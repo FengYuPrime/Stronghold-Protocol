@@ -74,12 +74,16 @@
   border: 0;
   cursor: pointer;
 }
+/* 没有右上那行汇总时（还没数据/兜底黄条），叉号自己顶到最右 —— 否则会贴着口径切换按钮 */
+.dpsm-modal__head:not(:has(.dpsm-modal__sum)) .dpsm-modal__x { margin-left: auto; }
 .dpsm-modal__x:hover { color: #c92a2a; }
 .dpsm-modal__body { padding: 4px 16px 14px; }
 .dpsm-modal__empty { padding: 22px 16px; }
 .dpsm-modal__emptyline { margin: 0; font-size: 14px; color: #1a2027; }
 /* 没数据时的诊断行：编号有没有存到 / 副本里几回合（用户不用翻控制台就能看出断在哪） */
 .dpsm-modal__diag { margin: 8px 0 0; font-size: 12px; color: #5b6470; }
+/* 这一局没有存档、图上兜底显示的是「最近一局」时的警告条（用户报的「统计没更新」多半就是这种情况） */
+.dpsm-modal__warn { margin: 0; padding: 8px 16px; font-size: 12px; color: #7a4a00; background: #fff4d6; border-bottom: 1px solid #f0dcae; }
 /* 折线图容器（ECharts 自己画 canvas；尺寸由这里定，容器变化时组件会 chart.resize()） */
 .dpsm-echart { width: 100%; height: 340px; }
 .dpsm-modal__note { margin: 8px 0 0; font-size: 12px; color: #5b6470; }

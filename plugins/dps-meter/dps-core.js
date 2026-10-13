@@ -45,6 +45,8 @@ export function takeSample(units, time) {  const list = Array.isArray(units) ? u
     time: Number.isFinite(time) && time > 0 ? time : 0,
     units: list.map((u, i) => ({
       unitId: Number.isInteger(u && u.unitId) ? u.unitId : null,
+      // 归属玩家：观战队友的战场 / 联防共用战场时，同屏会有两个人的干员，必须带上才能分开统计
+      ownerId: (u && typeof u.ownerId === 'string') ? u.ownerId : null,
       defId: (u && (u.defId || u.name)) || `#${i}`,
       name: (u && (u.name || u.defId)) || `#${i}`,
       kind: (u && u.kind) || 'op',
@@ -79,9 +81,10 @@ export function rateBetween(from, to, seconds) {
   };
 }
 
-/** 稳定的单位键：有 uid 用 uid，否则用 defId + 序号。 */
+/** 稳定的单位键：有 uid 用 uid，否则用 defId + 序号；**前缀归属玩家**（观战/联防时同一屏里有两个人的干员）。 */
 export function keyOf(unit, index = 0) {
-  return unit && Number.isInteger(unit.unitId) ? `u${unit.unitId}` : `${(unit && unit.defId) || 'x'}#${index}`;
+  const who = (unit && unit.ownerId) || '';
+  return unit && Number.isInteger(unit.unitId) ? `${who}:u${unit.unitId}` : `${who}:${(unit && unit.defId) || 'x'}#${index}`;
 }
 
 /**
@@ -122,6 +125,7 @@ export function aggregate(samples, battleTime) {
     rows.push({
       key,
       unitId: cur.unitId,
+      ownerId: cur.ownerId,
       name: cur.name,
       defId: cur.defId,
       golden: cur.golden,

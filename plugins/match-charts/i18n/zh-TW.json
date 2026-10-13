@@ -13,5 +13,6 @@
   "每回合伤害量": "每回合傷害量",
   "每回合治疗量": "每回合治療量",
   "最后一回合": "最後一回合",
-  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "圖表庫未安裝：在倉庫根目錄執行 npm install && npm run vendor，然後重啟"
+  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "圖表庫未安裝：在倉庫根目錄執行 npm install && npm run vendor，然後重啟",
+  "这一局还没有存档，图上是最近一局（{time}）": "這一局還沒有存檔，圖上是最近一局（{time}）"
 }

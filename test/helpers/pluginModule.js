@@ -41,6 +41,18 @@ export function stubDom() {
   globalThis.localStorage = { store: new Map(), getItem(k) { return this.store.get(k) ?? null; }, setItem(k, v) { this.store.set(k, String(v)); }, removeItem(k) { this.store.delete(k); } };
   globalThis.innerWidth = 1280;
   globalThis.innerHeight = 720;
+  // 一条最小事件总线：Node 的 globalThis 不是 EventTarget，插件里 `globalThis.addEventListener?.(…)`
+  // 会静默失效 —— 那样「结算落库（sp:match-record）」这条链在测试里根本跑不到。
+  const listeners = new Map();
+  globalThis.addEventListener = (type, fn) => {
+    if (!listeners.has(type)) listeners.set(type, new Set());
+    listeners.get(type).add(fn);
+  };
+  globalThis.removeEventListener = (type, fn) => { listeners.get(type)?.delete(fn); };
+  globalThis.dispatchEvent = (e) => {
+    for (const fn of listeners.get(e && e.type) || []) fn(e);
+    return true;
+  };
   // 插件用 rAF 轮询自己重画；测试里不跑它（否则会一直自我重排，进程结束不了）
   globalThis.requestAnimationFrame = () => 0;
   globalThis.cancelAnimationFrame = () => {};

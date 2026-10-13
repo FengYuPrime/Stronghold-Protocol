@@ -35,7 +35,7 @@ export async function loadEcharts() {
     const mod = await import('/vendor/echarts.module.js');
     echartsLib = mod && typeof mod.init === 'function' ? mod : (mod?.default && typeof mod.default.init === 'function' ? mod.default : null);
   } catch { echartsLib = null; }
-  if (!echartsLib) console.warn('[plugin:match-charts] 没找到 /vendor/echarts.module.js：在仓库根目录跑 npm install && npm run vendor');
+  if (!echartsLib) console.warn('[plugin:match-charts] /vendor/echarts.module.js not found — run `npm install && npm run vendor` in the repo root');
   return echartsLib;
 }
 
@@ -86,9 +86,12 @@ function EChartView({ series, rounds, axisName, api }) {
 
 /**
  * 白底黑字的弹窗：标题栏 + 口径切换 + ECharts 折线图（工具提示与图例交互都由 ECharts 提供）。
- * @param {{ recordId: string|null, entry: any|null, api: any, onClose: () => void }} props
+ *
+ * `fellBack` 说明这一局没有存档、图上是「最近一局」（resolveMatch 的兜底）—— 那正是「统计没更新」的观感来源，
+ * 所以要在界面上直接说出来，而不是只在控制台里。
+ * @param {{ recordId: string|null, entry: any|null, fellBack?: boolean, api: any, onClose: () => void }} props
  */
-export function MatchChartModal({ recordId, entry = null, api, onClose }) {
+export function MatchChartModal({ recordId, entry = null, fellBack = false, api, onClose }) {
   const t = api.t;
   const [metric, setMetric] = useState('dmg');   // 'dmg' 总伤 | 'heal' 总治疗
   const { rounds, series } = useMemo(() => (entry ? unitSeries(entry, metric) : { rounds: [], series: [] }), [entry, metric]);
@@ -96,6 +99,9 @@ export function MatchChartModal({ recordId, entry = null, api, onClose }) {
   const label = metric === 'heal' ? t('每回合治疗量') : t('每回合伤害量');
   const axisName = metric === 'heal' ? t('总治疗') : t('总伤');
   const total = series.reduce((n, s) => n + s.total, 0);
+  // 存档时间（HH:MM）：一眼看出图上是不是「几小时前那一局」
+  const at = Number(entry && entry.at) || 0;
+  const hhmm = at ? `${String(new Date(at).getHours()).padStart(2, '0')}:${String(new Date(at).getMinutes()).padStart(2, '0')}` : '';
   // 没数据时把「断在哪一环」直接写出来（不翻控制台也能判断）：编号有没有存到、副本里有几回合
   const diag = !entry
     ? t('该局还没存档（编号 {id}）；本局副本里现 {n} 回合', { id: recordId || '—', n: readLatest().length })
@@ -110,9 +116,10 @@ export function MatchChartModal({ recordId, entry = null, api, onClose }) {
           ${hasHeal ? html`<button type="button" role="tab" aria-selected=${metric === 'heal' ? 'true' : 'false'}
             class=${metric === 'heal' ? 'is-on' : ''} onClick=${() => setMetric('heal')}>${t('总治疗')}</button>` : null}
         </div>
-        ${series.length ? html`<span class="dpsm-modal__sum">${t('{n} 回合', { n: rounds.length })} · ${label} ${fmt(total)}</span>` : null}
+        ${series.length ? html`<span class="dpsm-modal__sum">${t('{n} 回合', { n: rounds.length })} · ${label} ${fmt(total)}${hhmm ? ` · ${hhmm}` : ''}</span>` : null}
         <button type="button" class="dpsm-modal__x" title=${t('关闭')} aria-label=${t('关闭')} onClick=${onClose}>×</button>
       </header>
+      ${fellBack ? html`<p class="dpsm-modal__warn">${t('这一局还没有存档，图上是最近一局（{time}）', { time: hhmm || '—' })}</p>` : null}
       ${!entry || !series.length
         ? html`<div class="dpsm-modal__empty">
             <p class="dpsm-modal__emptyline">${t('这一局没有战斗统计（当时未开启统计悬浮窗）')}</p>
@@ -148,14 +155,16 @@ function currentRecordId() {
  * 取要画的那一局：先按编号找，**找不到就退回「最近存档的一局」**。
  *
  * 编号是「事件 detail → 存档 → 按钮」一路传过来的，任何一环没接上都会让弹窗显示「没数据」；结算页上
- * 最近一局就是刚打完那局，兜底更稳。
- * @returns {{ id: string|null, entry: any|null }}
+ * 最近一局就是刚打完那局，兜底更稳。`fellBack` 说明这次是兜底拿的（排查「图表还是上一局」时看这个）。
+ * @returns {{ id: string|null, entry: any|null, fellBack: boolean }}
  */
 export function resolveMatch(id = currentRecordId()) {
   const direct = readMatch(id);
-  if (direct) return { id, entry: direct };
+  if (direct) return { id, entry: direct, fellBack: false };
   const newest = newestMatch();
-  return newest ? { id: newest.id, entry: newest.entry } : { id: id || null, entry: null };
+  return newest
+    ? { id: newest.id, entry: newest.entry, fellBack: true }
+    : { id: id || null, entry: null, fellBack: false };
 }
 
 /**
@@ -204,13 +213,14 @@ export function mountResultButton(api) {
   }
   const openModal = () => {
     closeModal();
-    const { id, entry } = resolveMatch();
+    const { id, entry, fellBack } = resolveMatch();
     host = document.createElement('div');
     host.className = 'dpsm-modal-host';
     document.body.appendChild(host);
-    render(html`<${MatchChartModal} recordId=${id} entry=${entry} api=${api} onClose=${closeModal} />`, host);
+    render(html`<${MatchChartModal} recordId=${id} entry=${entry} fellBack=${fellBack} api=${api} onClose=${closeModal} />`, host);
     document.addEventListener('keydown', onKey, true);
-    if (globalThis.__SP_DEBUG_PLUGINS__) console.info('[plugin:match-charts] 打开曲线弹窗', { id, 回合: entry?.rounds?.length ?? 0 });
+    // 排查「图表没更新」的第一手证据：打开的是哪一局、几回合、是不是兜底拿的旧记录
+    api.log?.(`chart opened: record ${id ?? '—'} · ${entry?.rounds?.length ?? 0} round(s)${fellBack ? ' · FELL BACK to the newest archived match (the current record has no archive)' : ''}`);
   };
 
   const paint = () => {
@@ -255,18 +265,19 @@ export function mountResultButton(api) {
 export function createRecorder(api, readHistory) {
   const onRecord = (e) => {
     const rec = e && e.detail;
-    if (!rec || typeof rec.id !== 'string') return;
+    if (!rec || typeof rec.id !== 'string') {
+      api.warn?.('sp:match-record without a usable id — skipped', e && e.detail);
+      return;
+    }
     const entry = matchLog(readHistory() || [], { difficulty: rec.difficulty, roomMode: rec.roomMode, victory: rec.victory });
+    lastRecordId = rec.id;   // 即使这一局没数据，也让按钮按这个编号去找（找不到会退回「最近一局」）
     if (!entry) {
-      // 沉默失败最坑：这里明确报出来（面板没取样到 / 历史为空），并保留编号让按钮仍能定位
-      api.warn?.(`[dps-meter] 这一局没有可存档的回合，曲线会是空的（record ${rec.id}）`);
-      lastRecordId = rec.id;
+      // 沉默失败最坑：明确报出来。曲线会停在上一局 —— 这条日志就是「图表没更新」的现场证据。
+      api.warn?.(`no rounds to archive for ${rec.id} — the chart will keep showing an older match`);
       return;
     }
     const ok = saveMatch(rec.id, entry);
-    lastRecordId = rec.id;
-    if (!ok) api.warn?.(`[dps-meter] 曲线存档写盘失败（record ${rec.id}）`);
-    if (globalThis.__SP_DEBUG_PLUGINS__) console.info('[plugin:match-charts] 存档一局的曲线', rec.id, `回合 ${entry.rounds.length}`, ok ? 'OK' : '写盘失败');
+    api.log?.(`match archived: ${rec.id} · ${entry.rounds.length} round(s) · damage ${entry.total.dmg} · healing ${entry.total.heal}${ok ? '' : ' — WRITE FAILED'}`);
   };
   globalThis.addEventListener?.(RECORD_EVENT, onRecord);
   return () => globalThis.removeEventListener?.(RECORD_EVENT, onRecord);

@@ -13,5 +13,6 @@
   "每回合伤害量": "damage per round",
   "每回合治疗量": "healing per round",
   "最后一回合": "final round",
-  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "Chart library missing: run npm install && npm run vendor in the repo root, then restart"
+  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "Chart library missing: run npm install && npm run vendor in the repo root, then restart",
+  "这一局还没有存档，图上是最近一局（{time}）": "This match has no archive yet — showing the most recent one ({time})"
 }

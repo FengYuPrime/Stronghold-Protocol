@@ -11,19 +11,38 @@
 
 import { createRecorder, mountResultButton } from './chart.js';
 import {
-  SAMPLE_MS, LATEST_KEY, serializeLatest, takeSample, stepRound, withLiveRound, unitKey, matchActive, isContributor,
+  SAMPLE_MS, LATEST_KEY, serializeLatest, takeSample, stepRound, withLiveRound, unitKey, matchActive, isContributor, readLog,
+  readLatest,
 } from './charts-core.js';
 
 /** The runner's own `field` event, defensively: the plugin must work on a runner without it. */
 function runnerHook(api, fn) {
-  try { return api.runner?.on?.('field', fn) || (() => {}); } catch { return () => {}; }
+  try { return runnerOf(api)?.on?.('field', fn) || (() => {}); } catch { return () => {}; }
 }
 
-/** Every fieldId this client currently holds a battle for (battleRunner keeps one entry per field). */
+/**
+ * 这场战斗的 runner：先问宿主（`api.runner`），拿不到就退回全局 `__SP_RUNNER__`。
+ *
+ * 宿主那个 getter 是懒取的，但**只要它为 null，取样循环就会每帧直接返回**，于是整局一条数据都没有
+ * （用户报的「战后统计一直不更新」：settled 日志里是 `handing over 0 round(s)`）。全局那个是
+ * `public/js/battle/runner.js` 模块级发布的，绕过宿主更稳。
+ */
+function runnerOf(api) {
+  try { return (api && api.runner) || globalThis.__SP_RUNNER__ || null; } catch { return null; }
+}
+
+/**
+ * 本客户端当前持有的每个**战场 id**（`fieldUnits(参数)` 要的是 fieldId，例如 `n:p_xxx`；`_entries` 的键是
+ * battleId，混用会让 `fieldUnits` 永远返回空 —— 见 sampleRound 的注释）。诊断日志用它列出战场。
+ */
 function allFieldIds(api) {
   try {
-    const entries = api.runner?._entries;
-    return entries && typeof entries.keys === 'function' ? [...entries.keys()] : [];
+    const entries = runnerOf(api)?._entries;
+    const out = [];
+    if (entries && typeof entries.values === 'function') {
+      for (const e of entries.values()) if (e && typeof e.fieldId === 'string' && e.fieldId) out.push(e.fieldId);
+    }
+    return out;
   } catch { return []; }
 }
 
@@ -36,27 +55,87 @@ function gameRound(api) {
   } catch { return null; }
 }
 
+/** 本机玩家 id（`store.me.playerId`）；读不到就 null（那时不做归属过滤）。 */
+function myPlayerId(api) {
+  try { const v = api?.store?.get?.()?.me?.playerId; return typeof v === 'string' && v ? v : null; } catch { return null; }
+}
+
+/**
+ * 原始模拟单位 → `fieldUnits()` 那种**拍平**形状。
+ *
+ * 关键：`battle.allyUnits` 里的单位把累计数据放在 `u.stats` 里（`u.stats.dmg/heal/taken/attacks/kills`），
+ * 而 `takeSample()`/`isContributor()` 读的是顶层字段。少了这一步，每个单位看起来都是 0 伤害、全被过滤掉，
+ * 于是整局 0 行数据（日志里表现为 `raw units=3` 但 `rowsSeen=0`）。映射规则与 runner 的 fieldUnits 完全一致。
+ */
+function battleUnits(list) {
+  const out = [];
+  for (const u of Array.isArray(list) ? list : []) {
+    if (!u) continue;
+    const st = u.stats || null;
+    out.push({
+      unitId: Number.isInteger(u.id) ? u.id : (Number.isInteger(u.uid) ? u.uid : null),
+      ownerId: typeof u.ownerId === 'string' ? u.ownerId : null,
+      defId: typeof u.defId === 'string' ? u.defId : null,
+      name: typeof u.name === 'string' ? u.name : (u.defId || ''),
+      kind: typeof u.kind === 'string' ? u.kind : 'op',
+      golden: !!(u.def && u.def.golden),
+      dmg: st ? Math.max(0, st.dmg || 0) : 0,
+      heal: st ? Math.max(0, st.heal || 0) : 0,
+      taken: st ? Math.max(0, st.taken || 0) : 0,
+      attacks: st ? Math.max(0, st.attacks || 0) : 0,
+      kills: st ? Math.max(0, st.kills || 0) : 0,
+    });
+  }
+  return out;
+}
+
 /**
  * 这一帧的「每个干员累计伤害 / 治疗」——按干员身份合并所有战场（同一名干员在多个战场里算一个人）。
  * @returns {{ rows: { key: string, name: string, defId: string|null, golden: boolean, dmg: number, heal: number }[], bid: string|null, done: boolean, time: number }}
  */
 export function sampleRound(api) {
-  const runner = api.runner;
+  const runner = runnerOf(api);
   const byKey = new Map();
   let bid = null;
   let done = false;
   let time = 0;
   let seen = false;
-  const fields = allFieldIds(api);
-  for (const fid of (fields.length ? fields : [null])) {
+  // 优先**直接读 runner 手里每个 entry 的战场对象**：`fieldUnits(fid)` 只认「当前显示在屏幕上」的那一场
+  // （作者的原话：a field other than the one on screen → []），换场 / 观战 / 联防时会整帧取空。
+  // 直接读 `e.battle.allyUnits` 则每个客户端持有的战场都能取到，且和 `fieldUnits` 读的是同一份数据。
+  const entries = (() => { try { return runner?._entries; } catch { return null; } })();
+  // 只看**自己的**干员：观战队友 / 联防共用战场时同屏还有他的干员，混进曲线就不是「我的每回合输出」了。
+  // ownerId 为空的单位（召唤物等没带归属的）仍然保留。
+  const me = myPlayerId(api);
+  const battles = [];
+  if (entries && typeof entries.values === 'function') {
+    for (const e of entries.values()) {
+      const b = e && e.battle;
+      if (!b || !Array.isArray(b.allyUnits)) continue;
+      const units = battleUnits(b.allyUnits).filter((u) => !u.ownerId || !me || u.ownerId === me);
+      battles.push({ id: e.battleId, units, time: b.time, done: !!b.finished || !!e.done });
+    }
+  }
+  if (!battles.length) {
+    // 兜底：只问「屏幕上那一场」（`fieldUnits(null)`）。
+    // 注意别再传 `_entries` 的键：那些是 **battleId**，而 `fieldUnits(参数)` 要的是 **fieldId**（`n:p_xxx`），
+    // 传错了它内部 `e.fieldId !== fieldId` 恒成立、永远返回空 —— 这正是之前整局 0 行数据的根因。
     let data;
-    try { data = runner?.fieldUnits?.(fid) || null; } catch { continue; }
-    if (!data || !Array.isArray(data.units) || !data.units.length) continue;
+    try { data = runner?.fieldUnits?.(null) || null; } catch { data = null; }
+    if (data && Array.isArray(data.units) && data.units.length) {
+      // 兜底这条路也要按归属过滤：观战队友时 `fieldUnits(null)` 给的就是**他的**干员，
+      // 直接收下会把队友的数据记进我的曲线（战后统计只记自己的）。
+      const units = battleUnits(data.units).filter((u) => !u.ownerId || !me || u.ownerId === me);
+      battles.push({ id: data.battleId, units, time: data.time, done: data.done === true });
+    }
+  }
+  for (const b of battles) {
+    if (!b.units.length) continue;
     seen = true;
-    if (bid == null) bid = data.battleId == null ? null : String(data.battleId);
-    if (data.done === true) done = true;
-    time = Math.max(time, Number.isFinite(data.time) ? data.time : 0);
-    for (const u of takeSample(data.units, data.time).units) {
+    if (bid == null) bid = b.id == null ? null : String(b.id);
+    if (b.done) done = true;
+    time = Math.max(time, Number.isFinite(b.time) ? b.time : 0);
+    for (const u of takeSample(b.units, b.time).units) {
       if (!isContributor(u)) continue;
       const key = unitKey(u);
       const cur = byKey.get(key);
@@ -86,8 +165,13 @@ export default function register(api) {
   let live = { round: null, time: 0, rows: [] };
   let roundRec = null;   // stepRound 的状态机记录
 
+  // 落盘副本：每收尾一回合就写一次，**连正在进行的这一回合一起写**。
+  // 这样即使内存里的 history/live 因为什么被清空，结算时还能从这份快照把这一局救回来（见下面的兜底）。
   const persist = () => {
-    try { globalThis.localStorage?.setItem(LATEST_KEY, JSON.stringify(serializeLatest(history))); } catch { /* quota / private mode */ }
+    try {
+      const snap = withLiveRound(history, live, { label: api.t('最后一回合') });
+      globalThis.localStorage?.setItem(LATEST_KEY, JSON.stringify(serializeLatest(snap)));
+    } catch { /* quota / private mode */ }
   };
 
   const closeRound = (rec) => {
@@ -99,12 +183,48 @@ export default function register(api) {
     for (const r of rows) { dmg += r.dmg || 0; heal += r.heal || 0; }
     history = [{ label: api.t('第 {n} 回合', { n: round }), at: Date.now(), time: rec.time || 0, round, dmg, heal, rows }, ...history];
     persist();
-    if (_debug()) console.info('[plugin:match-charts] 归档回合', round, rows.length, '人');
+    api.log?.(`round archived: round ${round} · ${rows.length} operators · damage ${dmg}`);
+  };
+
+  // 排查用：**每 3 秒最多一条**（不设总数上限，所以战斗中一定会打到，不会像之前那样被开打前的空帧用光）。
+  let lastDiagAt = 0;
+  let rowTicks = 0;      // 本局有多少次取样真的拿到了数据（结算日志里会带上）
+  const diag = () => {
+    if (Date.now() - lastDiagAt < 3000) return;
+    lastDiagAt = Date.now();
+    const r = runnerOf(api);
+    let entries = null;
+    let sample = null;
+    try {
+      entries = r && r._entries && typeof r._entries.size === 'number' ? r._entries.size : null;
+      const ids = entries ? [...r._entries.keys()] : [];
+      const d = r && typeof r.fieldUnits === 'function' ? r.fieldUnits(ids[0] ?? null) : null;
+      sample = d ? { battle: d.battleId ?? null, done: !!d.done, units: (d.units || []).length, dmg: (d.units || [])[0]?.dmg ?? null } : null;
+    } catch (e) { sample = `err:${e && e.message}`; }
+    // 直接读 entry 的战场对象（新采样路径）：看得出有几个战场、各有多少单位
+    let raw = null;
+    try {
+      const list = [];
+      const es = r && r._entries;
+      if (es && typeof es.values === 'function') for (const e of es.values()) list.push({ id: e?.battleId ?? null, units: e?.battle?.allyUnits?.length ?? 0, t: e?.battle?.time ?? null, fin: !!e?.battle?.finished });
+      raw = list;
+    } catch (e) { raw = `err:${e && e.message}`; }
+    // runner 自己的视角（0.2.5 的公开 API）：它认不认这场战斗、是不是「本客户端权威」
+    let st = null;
+    try {
+      const v = typeof r?.state === 'function' ? r.state() : null;
+      st = v ? { id: v.battleId ?? null, field: v.fieldId ?? null, kind: v.kind ?? null, auth: !!v.authoritative, done: !!v.done } : null;
+    } catch (e) { st = `err:${e && e.message}`; }
+    const phase = (() => { try { return api.store?.get?.()?.match?.public?.phase ?? null; } catch { return null; } })();
+    api.log?.(`tick diag: phase=${phase} rowsSeen=${rowTicks} runner=${!!r} entries=${entries} fields=${JSON.stringify(allFieldIds(api))} raw=${JSON.stringify(raw)} sample=${JSON.stringify(sample)} state=${JSON.stringify(st)}`);
   };
 
   const tick = () => {
-    if (!api.runner || typeof api.runner.fieldUnits !== 'function') return;
+    const runner = runnerOf(api);
+    if (!runner) { diag(); return; }
     const { rows, bid, done, time } = sampleRound(api);
+    if (rows.length) rowTicks++;
+    else diag();
     // 回合状态机：回合结束（done）/ 换场（battleId 变了）/ 战斗消失（连续两次取不到）三条路各收一次
     const info = rows.length ? { key: 'all', bid, done, time } : null;
     const step = stepRound(roundRec, info, { round: gameRound(api) });
@@ -125,28 +245,63 @@ export default function register(api) {
   const offField = runnerHook(api, tick);
 
   // 一局结束（记录落库）：把「已收尾的回合 + 进行中的这一回合」一起按 record.id 存档
-  const stopRecorder = createRecorder(api, () => withLiveRound(history, live, { label: api.t('最后一回合') }));
+  //
+  // 这里打的两行日志是排查「图表没更新」的抓手：
+  //   · 每次落库都说明交出去几回合（history + live）—— 若这里是 0，说明这一局根本没采到样；
+  //   · 真正的写盘结果在 chart.js 的 createRecorder（会打出 record.id 与回合数）。
+  const stopRecorder = createRecorder(api, () => {
+    const merged = withLiveRound(history, live, { label: api.t('最后一回合') });
+    // 兜底：内存里空了就用落盘快照（`sp.charts.latest`，每次回合收尾都写）。内存被清空时（结算前后 store 抖动
+    // 触发过「新一局」清理）这一局仍然能存下来，而不是让图表退回上一局。
+    const snap = merged.length ? [] : readLatest();
+    api.log?.(`match settled: handing over ${merged.length} round(s) (closed ${history.length} + live ${live.rows.length} rows · rowTicks ${rowTicks})`
+      + (merged.length ? ' — ok' : snap.length ? ` — MEMORY EMPTY, recovered ${snap.length} round(s) from the snapshot` : ' — NOTHING TO ARCHIVE (no data was ever sampled)'));
+    return merged.length ? merged : snap;
+  });
 
-  // 新一局开始：清掉上一局的回合（否则新一局的曲线会把上一局的回合算进去）
+  // 新一局开始：清掉上一局的回合（否则新一局的曲线会把上一局的回合算进去）。
+  //
+  // 「新一局」判定要防抖动：战斗结束前后 store 可能瞬间没有 match.public（false → true 一闪），
+  // 那种抖动如果当成新一局，就会把刚打完这局的回合全擦掉 —— 结算事件紧接着到达，于是变成
+  // 「NOTHING TO ARCHIVE」、图表一直显示上一局（用户报的现象）。所以只在**确实闲置过一段时间**后才清。
+  const NEW_MATCH_GAP_MS = 1200;
   let offStore = () => {};
   const store = api.store;
   if (store && typeof store.subscribe === 'function' && typeof store.get === 'function') {
     let was = matchActive(store.get());
+    let idleSince = was ? 0 : Date.now();
     offStore = store.subscribe((s) => {
       const now = matchActive(s);
       if (now === was) return;
       was = now;
-      if (!now) return;                        // 结算 / 回大厅：先不动，等下一局开始时再清
+      if (!now) { idleSince = Date.now(); return; }   // 结算 / 回大厅：先不动，等下一局开始时再清
+      const idle = idleSince ? Date.now() - idleSince : Infinity;
+      idleSince = 0;
+      if (idle < NEW_MATCH_GAP_MS) {
+        api.log?.(`match re-activated after ${idle} ms — treated as a flicker, rounds kept`);
+        return;
+      }
       history = [];
       live = { round: null, time: 0, rows: [] };
       roundRec = null;
+      rowTicks = 0; lastDiagAt = 0;   // 新一局：诊断计数清零（心跳日志每 3 秒一条，不会再被吃完）
       try { globalThis.localStorage?.removeItem(LATEST_KEY); } catch { /* ignore */ }
-      if (_debug()) console.info('[plugin:match-charts] 新一局开始 → 清空回合记录');
+      api.log?.('new match started — cleared the previous match’s rounds');
     });
   }
 
   // 结算页「模拟完成」标题旁的按钮 + 白底黑字弹窗
   const stopButton = mountResultButton(api);
+
+  // 控制台自查（排查「图表没更新」时用）：浏览器控制台执行 __SP_CHARTS__()
+  const probe = () => ({
+    closedRounds: history.length,
+    liveRound: live.round,
+    liveRows: live.rows.length,
+    current: roundRec ? { bid: roundRec.bid, round: roundRec.round, archived: !!roundRec.archived, rows: (roundRec.last || []).length } : null,
+    archivedMatches: Object.keys(readLog()),
+  });
+  try { globalThis.__SP_CHARTS__ = probe; } catch { /* no DOM */ }
 
   return {
     dispose() {
@@ -155,6 +310,7 @@ export default function register(api) {
       offStore();
       stopRecorder();
       stopButton();
+      try { if (globalThis.__SP_CHARTS__ === probe) delete globalThis.__SP_CHARTS__; } catch { /* ignore */ }
     },
   };
 }
