@@ -15,7 +15,7 @@ import {
   rangeGridBox, shortcutFor, sanitizeSettings, DEFAULT_SETTINGS, normalizeResult, cycleField, fieldLabel, homeFieldId,
   activeBubbles, sortedPlayers, tileKey, prepCapsuleLabel, prepCamera, dropFailureReason, terrainInfo,
 } from '../../public/js/ui/gameLogic.js';
-import { PHASE, GEO } from '../../shared/constants.js';
+import { PHASE, GEO, MULTI_PREP_SECONDS } from '../../shared/constants.js';
 import { setLang, setMessages } from '../../shared/i18n.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -219,8 +219,12 @@ describe('countdown', () => {
   });
   test('phase totals from config', () => {
     assert.equal(phaseTotalSeconds({ phase: PHASE.INFO_CHECK }, config), config.timers.infoCheck);
-    assert.equal(phaseTotalSeconds({ phase: PHASE.PREP, modeId: 'mode_multi_hard', round: 4 }, config), config.modes.mode_multi_hard.rounds['4'].prepTime);
+    // 准备阶段：多人是本 fork 固定的 MULTI_PREP_SECONDS（shared/constants.js），不再是数据里的按回合值；
+    // 单人/训练仍取数据（单人是 null = 不计时）。服务端的 deadline 走同一个常量，两边必须一致。
+    assert.equal(phaseTotalSeconds({ phase: PHASE.PREP, modeId: 'mode_multi_hard', round: 4 }, config), MULTI_PREP_SECONDS);
+    assert.equal(phaseTotalSeconds({ phase: PHASE.PREP, modeId: 'mode_multi_hard', round: 15 }, config), MULTI_PREP_SECONDS, '每一回合都一样');
     assert.equal(phaseTotalSeconds({ phase: PHASE.PREP, modeId: 'mode_single_hard', round: 4 }, config), null, 'solo prep untimed');
+    assert.equal(phaseTotalSeconds({ phase: PHASE.PREP, modeId: 'mode_training_1', round: 1 }, config), config.modes.mode_training_1.rounds['1'].prepTime, '训练模式不受影响');
     assert.equal(phaseTotalSeconds({ phase: PHASE.SP_DRAFT, sp: { cards: [], picks: {} }, players: [] }, config), config.timers.spFirst);
     assert.equal(phaseTotalSeconds({ phase: PHASE.SP_DRAFT, sp: { cards: [{}, {}], picks: { a: 0 } }, players: [{ playerId: 'a' }] }, config), config.timers.spTurn);
     assert.equal(phaseTotalSeconds(null, config), null);

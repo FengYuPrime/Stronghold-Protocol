@@ -3,6 +3,21 @@
 import { N_ } from './i18n.js';
 
 export const PROTOCOL_VERSION = 1;
+
+/**
+ * 本 fork 的刻意偏差（维护者决定）：**多人（MULTI）对局每回合的商店 / 准备阶段固定为 300 秒**，
+ * 不再用官方数据里按回合递增的值（`data/config.json` 的 `modes.<mode>.rounds[n].prepTime`，65 → 215 秒）。
+ *
+ * 为什么放在这里而不是改数据：`data/*.json` 是生成文件（仓库规则：不能手改，只能改生成器重新生成），
+ * 而这里的覆盖让两边读同一个常量 —— 服务端计时（`server/match/gamedata.js` 的 `prepTime()` 决定 PREP
+ * 的 deadline）与客户端倒计时（`public/js/ui/gameLogic/phases.js` 的 `phaseTotalSeconds()`）必须一致，
+ * 否则界面会在服务器仍然允许操作时先走到 0。
+ *
+ * 只影响**准备阶段**：`combatTimeLimit`（战斗时间）与单人对局（本来就不计时）都不动。
+ * 想恢复官方数值：把这里设为 `null`。玩家随时可以 Ready 提前开始，所以 300 秒是上限而不是必等的时长。
+ */
+export const MULTI_PREP_SECONDS = 300;
+
 /** Release version shown to players (title screen, server banner, /healthz). Kept equal to package.json "version"
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. */
 export const APP_VERSION = '0.2.5';

@@ -1,7 +1,7 @@
 // ui/gameLogic/phases.js — phase families, banners, the round's result box and 战斗结束 sound, countdowns. Re-exported
 // from ../gameLogic.js.
 
-import { PHASE } from '../../../../shared/constants.js';
+import { PHASE, MULTI_PREP_SECONDS } from '../../../../shared/constants.js';
 import { bossLevelSeconds } from '../matchStatus.js';
 import { clamp, int, isObj, sortedPlayers } from './shared.js';
 import { normalizeSp } from './draft.js';
@@ -219,7 +219,11 @@ export function phaseTotalSeconds(pub, config, myId = null) {
       const first = !sp || sp.pickedCount === 0;
       return first ? (num(timers.spFirst) ?? 30) : (num(timers.spTurn) ?? 16);
     }
-    case PHASE.PREP: return num(mode?.rounds?.[String(pub.round)]?.prepTime);
+    // 准备阶段：多人是本 fork 固定的 MULTI_PREP_SECONDS（见 shared/constants.js），与服务端 deadline 同源；
+    // 单人 / 训练模式仍取数据里的值（单人 null = 不计时）。战斗时间（下面那行）不受影响。
+    case PHASE.PREP: return (MULTI_PREP_SECONDS && mode?.type === 'MULTI')
+      ? MULTI_PREP_SECONDS
+      : num(mode?.rounds?.[String(pub.round)]?.prepTime);
     case PHASE.COMBAT:
     case PHASE.UNITE: return num(mode?.rounds?.[String(pub.round)]?.combatTimeLimit);
     // 最终攻势 / 隐秘核心: m.public.deadline is the level's 120 s countdown (maxPlayTime; the battle goes on past it)

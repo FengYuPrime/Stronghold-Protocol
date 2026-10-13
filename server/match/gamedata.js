@@ -14,6 +14,7 @@
 import { getConfig, getMode } from '../data.js';
 import { isShopItem } from '../sim/simdata.js';
 import { standInRecord } from '../../shared/standIn.js';
+import { MULTI_PREP_SECONDS } from '../../shared/constants.js';
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -371,6 +372,9 @@ export class GameData {
 
   /** Real-second prep timer for round r (null = untimed). */
   prepTime(r) {
+    // 本 fork 的刻意偏差：多人对局每回合的准备时间固定为 MULTI_PREP_SECONDS（见 shared/constants.js）。
+    // 客户端倒计时读同一个常量（public/js/ui/gameLogic/phases.js），两边必须一致。
+    if (MULTI_PREP_SECONDS && this.mode.type === 'MULTI') return MULTI_PREP_SECONDS;
     const rc = this.roundCfg(r);
     if (!rc) return this.isSolo ? null : 90;
     const v = rc.prepTime;

@@ -25,6 +25,9 @@ export class MatchPrep {
     // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime
     const secs = this.soloUntimed ? null : this.gd.prepTime(this.round);
     this.setDeadline(secs, () => this.prepDeadline());
+    // 排查准备时长用（本 fork 把多人准备阶段固定成 300s，见 shared/constants.js 的 MULTI_PREP_SECONDS）：
+    // 这一行会出现在服务器终端，能一眼看出「服务端到底用了多少秒」——客户端倒计时的剩余值就来自这个 deadline。
+    this.log?.info?.(`[prep] round ${this.round} · ${secs == null ? 'untimed' : `${secs}s`} · mode ${this.modeId} · soloUntimed=${this.soloUntimed} · deadline ${this.deadline ? `in ${Math.round((this.deadline - this.sched.now()) / 1000)}s` : 'none'}`);
     let i = 0;
     for (const ps of alive) if (ps.botControlled) this.scheduleBotPrep(ps, i++);
     this.markPublic();
