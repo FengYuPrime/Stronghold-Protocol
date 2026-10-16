@@ -24,6 +24,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
+    "debugstart": "node server/index.js --dev",
     "dev": "node --watch server/index.js",
     "test": "node --test",
     "golden": "node tools/golden.mjs",
