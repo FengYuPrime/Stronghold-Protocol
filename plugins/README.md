@@ -1,124 +1,73 @@
-# plugins/ — optional add-ons (docs/PLUGINS.md)
+# plugins/ — 插件 · plugins
 
-One folder is one plugin. **Installing** it means dropping the folder in; **removing** it means deleting the folder
-(or the whole `plugins/` directory). No plugin is required for the game to run, and a broken plugin is skipped with a
-warning instead of stopping the server.
+A server owner puts plugins here, one folder each: `plugins/<id>/plugin.json` (the manifest) next to the files it names.
+The server lists what it finds at `/plugins/index.json` and notices a new or changed plugin on the next page load.
+`node tools/plugin.mjs list` shows what was found, what was skipped and why; `node tools/plugin.mjs check` checks the
+folders (manifest, file types, sizes, paths, JSON).
 
-```
-plugins/<id>/plugin.json    the manifest (see below)
-plugins/<id>/plugin.js      the entry: `export default (api) => ({ dispose? })`
-plugins/<id>/…              whatever else the plugin ships (styles, i18n, helpers)
-```
+**This version (0.3.0):**
 
-`plugin.json`:
+- the original game is always the default; a plugin is marked unofficial wherever it is shown;
+- class `lang` (a language) loads, like a language pack in `packs/`;
+- class `cosmetic` (art, models, audio) loads: a room's host switches it on for the whole room (the room's 插件 panel),
+  a player for themself (设置 → 外观插件) — it changes what is shown and heard, never a battle;
+- class `content` (data: numbers, modes, new operators and enemies) loads as a JSON snapshot and builds validated content
+  sets: a room's host switches it on for the room (the room's 插件 panel) — every page downloads and checks the room's
+  content set, and its matches are unofficial (left out of the statistics overview unless a player counts them);
+- class `ui` (an interface widget) loads in a sandboxed frame: each player switches it on for this browser (设置 →
+  界面插件). It can read a little of the match on screen and cannot play it. It does not change `cs`;
+- `content` plugins can also hold JSON DSL skills/talents (`kit.dsl`) and prep effects (manifest `dsl`), without enabling scripts;
+- classes `script` and `trusted` (code) are off by default. `SP_PLUGIN_SCRIPTS=sandbox` runs locked script plugins in
+  SES inside browser Workers and restricted server children, without a trusted pin or per-player consent; public
+  listeners are allowed. Native `trusted` execution needs review, a lock pin in `config.json` and each player's consent;
+  public/wildcard listeners or a public reverse proxy require `trusted-force` (PLUGINS.md §13);
+- nothing in this folder except this readme, AGENTS.md and the templates in `_template/` is committed or shipped: your plugins
+  stay yours, and an update never touches them.
+
+**Make one in the browser:** open `/studio/` of the running server — the plugin studio 插件工作台 (this machine and the local
+network only): pick a template, find what to change by its official name, drop your files on their places, compare with
+the original in the game's own preview, try gameplay changes with the battle comparison and replay, then press 打包并下载 for the zip. Templates include numbers, operators, DSL/prep effects, modes, UI and scripts; the script source is edited in an external editor. The beginner's guide (Chinese):
+[docs/PLUGIN-GUIDE.md](../docs/PLUGIN-GUIDE.md); for AI agents: [AGENTS.md](AGENTS.md).
+
+On the command line: `node tools/plugin.mjs new art my-skin --target 德克萨斯` makes a folder from a template, `check` explains
+every finding in plain words, `pack <dir> --zip` writes the `plugin.lock.json` a plugin with Spine models needs and the zip.
+`_template/cosmetic/` is an example made of references to the installation's own art, no files.
+`_template/ui/` is an interface plugin: a damage tally in a sandboxed frame (DESIGN §32.8).
+
+For data, copy `_template/content/` to `data-demo/` (PLUGINS.md §10: a bond patch and a kitRef operator); a server owner
+may limit what rooms take in `config.json` here (PLUGINS.md §11, DEPLOY.md). The same file's `allowDownloadHosts`
+is the operator's https download allowlist (PLUGINS.md §17); it is not a room-policy field.
 
 ```json
 {
-  "type": "plugin",
-  "name": "战斗统计 DPS 悬浮窗",
-  "version": "1.0.0",
-  "app": ">=0.2.4",
-  "ui": true,
-  "entry": "plugin.js",
-  "files": { "css": "plugin.css", "core": "dps-core.js", "i18n": "i18n" }
+  "manifest": 2,
+  "id": "marathon",
+  "name": { "zh": "马拉松模式", "en": "Marathon" },
+  "version": "0.1.0",
+  "app": ">=0.3.0 <0.4.0",
+  "api": 1,
+  "class": "content",
+  "scope": ["room"],
+  "authors": ["your name"],
+  "license": "CC-BY-4.0",
+  "permissions": ["data.patch"],
+  "data": ["data/economy.json"]
 }
 ```
 
-| Field | Meaning |
-|---|---|
-| `name`, `version` | required; `version` is the plugin's own |
-| `app` | the app versions it is made for (`>=0.2.4`, `^0.2.4`, `*` …). Outside the range the plugin still loads and the server log flags it |
-| `entry` | the ES module the browser imports (`modules.default(api)`) |
-| `files` | extra files the plugin may load: role → path. A **folder name** (no extension, e.g. `i18n`) is expanded to every serveable file inside it |
-| `ui` | optional flag: the plugin adds UI |
+The id is the folder name: 2–32 lower-case letters, digits and `-`. A folder whose name starts with `_` (the templates)
+is never loaded. Never put files of the official game in a plugin: refer to the art the installation already has.
 
-The browser only ever loads files a manifest names (`/plugins/<id>/<file>`); nothing else under the folder is served,
-and a path that would lead outside the folder is refused.
+Install a local zip with `node tools/plugin.mjs install <zip>`; an HTTPS URL also needs `--sha256 <hash>`.
+`catalog <file|https URL>` inspects a community catalogue; `/studio/` offers 从目录安装. `--force` preserves the old
+folder under `_replaced/`; the studio's 删除所选 moves plugins into `_removed/` the same way (move a folder back here,
+named by its id again, to restore it). Forge packs use `import-forge <dir|zip> --dry-run` first, or 从 Forge 包导入 in the studio;
+kits whose imports map become one sandboxed script plugin (`--no-scripts` skips it), other scripts are reported and
+never copied, and nothing is executed. Installation does not enable script execution.
+`test <id>` runs local author code with the shipped battle harness. `surface` and [PLUGIN-API.md](../docs/PLUGIN-API.md)
+list stable and experimental interfaces, and `errors` explains the checks.
 
-## What a plugin gets (`api`)
+In Docker, the writable plugins volume is `/app/plugins`; the bundled templates and this guide live separately at
+`/app/plugin-resources` (`SP_PLUGIN_RESOURCES`), so mounting an empty plugins directory does not hide them.
 
-| Member | What |
-|---|---|
-| `api.id`, `api.manifest` | who it is |
-| `api.store`, `api.net`, `api.data` | the app's singletons (the same objects `globalThis.__SP__` carries) |
-| `api.runner` | the battle runner (`public/js/battle/runner.js`), or null — read it lazily |
-| `api.t`, `api.N_` | `shared/i18n.js` |
-| `api.i18n({folder})` | load this plugin's own `i18n/<lang>.json` and register it (no key in the app's packs) |
-| `api.mount(node, {parent})` | render a Preact element into a container the loader removes on unload |
-| `api.loadCss(rel?)` | inject a stylesheet a manifest names; removed on unload |
-| `api.on(type, fn)` | lifecycle: `ready`, `field` (`{ fieldId }` \| `{ fieldId: null }`), `phase` |
-| `api.log`, `api.warn` | prefixed console |
-
-`export default (api) => ({ dispose() {} })` — `dispose` runs on unload, before the loader removes the containers and
-stylesheets.
-
-## The bundled plugins
-
-Two independent plugins ship with the app. **Deleting either folder removes that feature and leaves the other working** —
-they do not import each other and they keep their state under different localStorage keys.
-
-### `dps-meter` — 对局悬浮窗
-
-Live per-operator **DPS (last 10 s / overall)**, **total damage** and **healing** during a battle, switchable between
-the battle on screen and every battle this client holds. Read-only: the numbers are the simulation's own per-unit
-accumulators (`server/sim/units.js`), exposed by `battleRunner.fieldUnits()` — the plugin never touches the sim.
-
-* the button and the panel are both draggable; positions live in `sp.dpsMeter.btn.pos` / `sp.dpsMeter.pos`;
-* sampling every 250 ms, 40 frames (10 s) per battle (`dps-core.js`, tests in `test/plugins/dps-meter.test.js`);
-* columns, in this order: **last 10 s DPS / overall DPS / total damage**, plus **last 10 s HPS / total healing** when
-  anyone healed (a zero is written as `0`, not hidden);
-* every number is an **integer** (`dps-core.fmtInt`; thousands separators from 10,000);
-* **ranking and the bars are by total damage** (`rankRows`' default);
-* a round is archived the moment it ENDS (`dps-core.stepRound`, three one-shot paths: `fieldUnits().done === true` →
-  `battleId` changed → the battle disappeared twice in a row), and the list folds under the table (12 rounds kept);
-* **closing the panel only hides it** (CSS `display:none`, the component stays mounted) so the rounds collected so far
-  survive closing and reopening; sampling keeps running while hidden;
-* a new match clears the window: the plugin watches the app store with `dps-core.matchActive()` (the same rule as
-  `ui/stats.js`'s `observeMatch`) and remounts the panel on the false → true transition.
-* Removal: delete `plugins/dps-meter/`. It writes only its own UI state (`sp.dpsMeter.pos` / `.open` / `.btn.pos`);
-  nothing in the core reads any of it.
-
-### `match-charts` — 战后统计图表
-
-A button next to 模拟完成 / 模拟失败 on the settlement screen (`h1.result__headline`, shared by the live result and the
-对局记录 replay). It opens a **white-background** modal with an ECharts line chart: **one line per operator**,
-x = the game's round number, y = that operator's total damage in that round (switchable to total healing).
-
-* it **samples the runner itself** (every 250 ms, all fields merged per operator), so it does not depend on the overlay
-  plugin being installed or open — delete `dps-meter` and the chart still works;
-* when the record is stored (`ui/stats.js` dispatches `sp:match-record`) it writes the match under that `record.id`
-  into `sp.charts.log` (20 matches kept), together with the round in progress (`withLiveRound`, since `m.result`
-  arrives before the last round closes); the per-round detail (each operator's damage/healing) is what the chart draws,
-  so it must never be reduced to totals;
-* storage keys are its own (`sp.charts.log` / `sp.charts.latest`); it still READS the pre-split `sp.dpsMeter.log`
-  (`LEGACY_LOG_KEY`) so matches archived before the split do not disappear;
-* it resolves which match to draw with `resolveMatch()`: by id first, then `newestMatch()` — the id travels
-  event detail → archive → button, and the fallback is what the settlement screen wants anyway;
-* **ECharts** (the maintainer asked for it over hand-rolled SVG): `echartsOption()` is a pure function with tests —
-  `tooltip.trigger: 'axis'` + `order: 'valueDesc'` gives the hover box (round title, colour dot, name, value, sorted),
-  and `legend` (`type: 'scroll'`) toggles a line on click with each operator's match total appended. Hiding lines makes
-  ECharts rescale the axis to the remaining ones.
-* dependency: `echarts` in `package.json` → `tools/vendor.mjs` copies it to `public/vendor/echarts.module.js`
-  (gitignored, like the other vendored builds). **Run `npm install && npm run vendor` once** (postinstall does it too),
-  then restart. It is imported **dynamically**, so without it everything else keeps working and the modal just says the
-  chart library is missing;
-* Removal: delete `plugins/match-charts/`. The button, the modal and the archived matches go with it; the stats page
-  and the core are untouched (the button is injected, nothing in the core knows it).
-
-### Core-side cost per plugin (removal checklist)
-
-| Core change | Needed by | If the owning plugin is deleted |
-|---|---|---|
-| `battle/runner.js` — `fieldUnits()` incl. the `done` flag | both | nothing calls the read-only tap; the runner is unchanged otherwise |
-| `ui/stats.js` — dispatch `sp:match-record` | match-charts | the event fires with no listener |
-| `screens/stats.js` — `data-record="<id>"` on the replay container | match-charts | an unused attribute |
-| `public/js/plugins.js`, `server/plugins.js`, two static routes, one line in `main.js` | the plugin system | no plugins load at all |
-
-## Adding your own
-
-
-1. `plugins/<your-id>/plugin.json` + `plugin.js`;
-2. `export default (api) => { const host = api.mount(html`…`); return { dispose() {} }; }`;
-3. reload the page — the server logs `[plugins] <your-id> (name)` and the browser loads it.
-
-Nothing in the app needs to change: the server scans the folder, the client loader (`public/js/plugins.js`) imports it.
+The format and the rules: [docs/PLUGINS.md](../docs/PLUGINS.md).

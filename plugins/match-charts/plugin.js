@@ -125,7 +125,9 @@ export function sampleRound(api) {
     if (data && Array.isArray(data.units) && data.units.length) {
       // 兜底这条路也要按归属过滤：观战队友时 `fieldUnits(null)` 给的就是**他的**干员，
       // 直接收下会把队友的数据记进我的曲线（战后统计只记自己的）。
-      const units = battleUnits(data.units).filter((u) => !u.ownerId || !me || u.ownerId === me);
+      // 注意**不要**再过一遍 battleUnits()：`fieldUnits()` 返回的已经是拍平后的单位（runner.js：dmg/heal/taken/
+      // attacks/kills 都在顶层），再过一次会被当成「没有 stats」，每个单位都记成 0 —— 整局 0 行数据。
+      const units = data.units.filter((u) => u && (!u.ownerId || !me || u.ownerId === me));
       battles.push({ id: data.battleId, units, time: data.time, done: data.done === true });
     }
   }

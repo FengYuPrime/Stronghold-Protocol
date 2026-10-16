@@ -34,6 +34,7 @@ import { isCombatPhase, isBossPhase, prepCapsuleLabel, bossFrac, bossPctText, fm
 import { overtimeState, overtimeDrainPerSec, remainAt } from './matchStatus.js';
 import { hotkeyLabelOf } from './settings.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
+import { UnofficialMark } from './pluginTag.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -353,13 +354,14 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  *   live?: { pending: number, unite: boolean, left?: number|null } | null,
  *   spectators?: any[]|null, myId?: any, isHost?: boolean, onRemoveSpectator?: ((playerId: any) => any)|null }} props
  *   spectators: the room's spectator seats (room.state) — the 观战席 capsule beside the latency (SpectatorPill; the host removes)
+ *   room: room.state — a match with gameplay plugins shows the small MOD mark beside the difficulty (DESIGN §32.6)
  *   frozenAt: the server time every clock shows while the solo match is paused (null = live)
  *   live: the own battle's pending LP loss (liveLp): the tower keeps the settled lp and adds a red −N tick, 联防中 during 联防;
  *     `left` (a leaker in 联防): its enemies still standing — the capsule's ×N tag
  */
 export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, onDevGold = null, onDevLp = null }) {
+  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, onDevGold = null, onDevLp = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
   const lp = boss && Number.isFinite(pub?.teamLp) ? pub.teamLp : Number.isFinite(priv?.lp) ? priv.lp : null;
@@ -393,6 +395,7 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         ${priv?.dev && onDevGold ? html`<button type="button" class="gtop__dev" data-testid="dev-gold" title=${t('开发调试：+999 资金')} onClick=${onDevGold}>${t('+999 资金')}</button>` : null}
         ${/* 调试 (SP_DEV=1)：点一下扣自己 1 点目标生命值（按住 Shift 扣 99），用来把一局快速推到结算。 */ null}
         ${priv?.dev && onDevLp ? html`<button type="button" class="gtop__dev" data-testid="dev-lp" title="dev: -1 LP (Shift: -99)" onClick=${(e) => onDevLp(e && e.shiftKey ? 99 : 1)}>-1 LP</button>` : null}
+        <${UnofficialMark} room=${room} compact=${true} class="gtop__mod" />
       </div>
     </div>
 

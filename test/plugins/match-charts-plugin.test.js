@@ -56,6 +56,9 @@ test('连打两把：第二把必须按新的 record 建档，不能停在第一
 
   // ---- 结算 → 再开一局（matchActive 的 false → true 跳变会清空窗口）----
   api.emit({ match: { public: { phase: 'RESULT', round: 3 }, result: { victory: true } } });
+  // 插件对「新一局」有 1200 ms 去抖（结算前后 store 的 false → true 抖动不能当成新一局，否则刚打完这局的回合会被擦掉），
+  // 所以这里真的闲置过 1200 ms 再开下一局；不等待的话它按「抖动」处理，上一局的回合会留在窗口里，第二局的曲线带上第一局的数据。
+  await new Promise((r) => setTimeout(r, 1300));
   api.emit({ match: { public: { phase: 'INFO_CHECK', round: 1 }, result: null } });
 
   // ---- 第二把：一回合打了 7777 ----

@@ -159,7 +159,13 @@ export async function installPlugins({ hub = createPluginHub(), url = PLUGINS_IN
   if (!entries.length) return [];
   const ids = [];
   for (const entry of entries) {
-    if (!entry || typeof entry.entry !== 'string' || typeof entry.id !== 'string') { warn('index entry without id/entry', entry); continue; }
+    if (!entry || typeof entry.id !== 'string') { warn('index entry without id', entry); continue; }
+    // 0.3.0 起 `/plugins/index.json` 是「官方目录 + 本 fork 的插件」：官方条目带 class/status 而没有 `entry`，
+    // 不是给这个加载器用的，安静跳过；只有本 fork 形状的条目缺 `entry` 才值得警告（那是真的清单坏了）。
+    if (typeof entry.entry !== 'string') {
+      if (typeof entry.class !== 'string') warn(`${entry.id}: index entry without entry`, entry);
+      continue;
+    }
     try {
       const mod = await import(/* @vite-ignore */ entry.entry);
       const register = typeof mod.default === 'function' ? mod.default : (typeof mod.register === 'function' ? mod.register : null);

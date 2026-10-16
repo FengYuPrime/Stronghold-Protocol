@@ -83,8 +83,11 @@ export function rateBetween(from, to, seconds) {
 
 /** 稳定的单位键：有 uid 用 uid，否则用 defId + 序号；**前缀归属玩家**（观战/联防时同一屏里有两个人的干员）。 */
 export function keyOf(unit, index = 0) {
+  // 归属（ownerId）是键的一部分：观战 / 联防时同屏还有队友的干员，而单位 id 只在**自己那一场**里唯一。
+  // 没有归属的单位（召唤物等）不加前缀，键保持 `u7` / `defId#2` 这种干净形状。
   const who = (unit && unit.ownerId) || '';
-  return unit && Number.isInteger(unit.unitId) ? `${who}:u${unit.unitId}` : `${who}:${(unit && unit.defId) || 'x'}#${index}`;
+  const prefix = who ? `${who}:` : '';
+  return unit && Number.isInteger(unit.unitId) ? `${prefix}u${unit.unitId}` : `${prefix}${(unit && unit.defId) || 'x'}#${index}`;
 }
 
 /**

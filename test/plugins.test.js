@@ -162,8 +162,11 @@ test('the static handler serves /plugins/index.json and the plugin files, 404 fo
     const index = await get('/plugins/index.json');
     assert.equal(index.status, 200);
     const parsed = JSON.parse(index.body);
-    assert.equal(parsed.plugins.length, 1);
-    assert.equal(parsed.plugins[0].id, 'demo');
+    // 0.3.0：`/plugins/index.json` 现在是**官方目录 + 本 fork 的插件**（server/http/static.js 把两个注册表
+    // 合在了一起），所以不能再断言「只有 1 个」—— 按 id 找出沙箱里那一个，并确认 entry 的 URL 也给了。
+    const demo = parsed.plugins.filter((p) => p && p.id === 'demo');
+    assert.equal(demo.length, 1);
+    assert.equal(demo[0].entry, '/plugins/demo/plugin.js');
 
     const js = await get('/plugins/demo/plugin.js');
     assert.equal(js.status, 200);
