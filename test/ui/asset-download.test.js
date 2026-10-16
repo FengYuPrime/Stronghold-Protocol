@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { collectAssetUrls, createAssetDownload } from '../../public/js/assetDownload.js';
+import { mediaUrl } from '../../public/js/media.js';
 
 const json = (value) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 const file = () => new Response('asset', { headers: { 'content-type': 'application/octet-stream' } });
@@ -171,4 +173,62 @@ test('the official battle effects manifest (/data/local-fx.json, DESIGN §33) is
   assert.equal(queue.get().phase, 'complete');
   assert.ok(got.includes('/assets/~fedcba0987654321/local/fx/prefabs/common_hit_01.json'));
   assert.ok(got.includes('/assets/~1234567890abcdef/a.png'));
+});
+
+// This fork's two kinds of extra material: the operator outfits (`chars[<charId>].skins[<skinId>]`: the front and
+// back Spine models, the avatar and the portrait) and the local-client art of data/local-assets.json
+// (`/assets/local/…`). Both reach the queue only because collectAssetUrls walks the served manifest instead of a key
+// list (docs/SKINS.md, docs/ASSETS.md §13): a filter that ever started excluding a subtree fails here.
+test('the committed manifests are queued whole: operator skins (front and back) and public/assets/local', () => {
+  const assets = JSON.parse(readFileSync(new URL('../../data/assets.json', import.meta.url), 'utf8'));
+  const local = JSON.parse(readFileSync(new URL('../../data/local-assets.json', import.meta.url), 'utf8'));
+  const urls = new Set(collectAssetUrls(assets, local));
+
+  // 1. every art URL of either manifest is queued, whatever key path it sits under (audio under its /media/ URL)
+  const missing = [];
+  const walk = (value) => {
+    if (typeof value === 'string') {
+      if (/^\/(?:assets|fonts)\/[^/]/.test(value) && !/[?#\\]/.test(value) && !urls.has(mediaUrl(value))) missing.push(value);
+      return;
+    }
+    if (value && typeof value === 'object') for (const child of Object.values(value)) walk(child);
+  };
+  walk(assets);
+  walk(local);
+  assert.equal(missing.length, 0, `art URLs the queue never sees: ${missing.slice(0, 5).join(', ')}`);
+
+  // 2. the outfits: every set the manifest carries, both directions, its art and its model members
+  let sets = 0;
+  let files = 0;
+  for (const [charId, char] of Object.entries(assets.chars)) {
+    for (const [skinId, skin] of Object.entries(char.skins || {})) {
+      sets++;
+      for (const url of [skin.avatar, skin.portrait]) {
+        if (!url) continue;
+        assert.ok(urls.has(url), `${charId}/${skinId}: ${url}`);
+        files++;
+      }
+      for (const dir of ['front', 'back']) {
+        const model = skin.spine?.[dir];
+        if (!model) continue;
+        for (const url of [model.skel, model.atlas, ...(model.textures || [])]) {
+          if (!url) continue;
+          assert.ok(urls.has(url), `${charId}/${skinId}/${dir}: ${url}`);
+          files++;
+        }
+      }
+    }
+  }
+  assert.ok(sets > 0 && files >= sets * 4, `outfits walked: ${sets} sets / ${files} files`);
+
+  // 3. the local-client art (`data/local-assets.json` → `/assets/local/…`)
+  const localPaths = [];
+  const paths = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.path === 'string') localPaths.push(value.path);
+    for (const child of Object.values(value)) paths(child);
+  };
+  paths(local.groups);
+  assert.ok(localPaths.length > 0);
+  assert.equal(localPaths.filter((path) => !urls.has(path)).length, 0, `local files the queue never sees: ${localPaths.slice(0, 5).join(', ')}`);
 });
