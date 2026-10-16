@@ -1916,6 +1916,25 @@
     ],
     "char_1033_swire2": [
       {
+        "skinId": "char_1033_swire2@nlc#1",
+        "stem": "char_1033_swire2_nlc_1",
+        "name": "盛世之象",
+        "group": "国家图书馆",
+        "avatar": { "url": "https://raw.githubusercontent.com/yuanyan3060/ArknightsGameResource/main/avatar/char_1033_swire2_nlc%231.png" },
+        "battleSpine": {
+          "front": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Front/char_1033_swire2_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Front/char_1033_swire2_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Front/char_1033_swire2_nlc_1.png" }
+          },
+          "back": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Back/char_1033_swire2_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Back/char_1033_swire2_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1033_swire2/char_1033_swire2_nlc_1/Back/char_1033_swire2_nlc_1.png" }
+          }
+        }
+      },
+      {
         "skinId": "char_1033_swire2@ambienceSynesthesia#4",
         "stem": "char_1033_swire2_ambienceSynesthesia_4",
         "name": "律动方格",
@@ -4487,6 +4506,25 @@
     ],
     "char_1040_blaze2": [
       {
+        "skinId": "char_1040_blaze2@nlc#1",
+        "stem": "char_1040_blaze2_nlc_1",
+        "name": "夜行烛火",
+        "group": "国家图书馆",
+        "avatar": { "url": "https://raw.githubusercontent.com/yuanyan3060/ArknightsGameResource/main/avatar/char_1040_blaze2_nlc%231.png" },
+        "battleSpine": {
+          "front": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Front/char_1040_blaze2_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Front/char_1040_blaze2_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Front/char_1040_blaze2_nlc_1.png" }
+          },
+          "back": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Back/char_1040_blaze2_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Back/char_1040_blaze2_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_1040_blaze2/char_1040_blaze2_nlc_1/Back/char_1040_blaze2_nlc_1.png" }
+          }
+        }
+      },
+      {
         "skinId": "char_1040_blaze2@winter#5",
         "stem": "char_1040_blaze2_winter_5",
         "name": "夜归人",
@@ -6697,6 +6735,25 @@
       }
     ],
     "char_2025_shu": [
+      {
+        "skinId": "char_2025_shu@nlc#1",
+        "stem": "char_2025_shu_nlc_1",
+        "name": "源远流长",
+        "group": "国家图书馆",
+        "avatar": { "url": "https://raw.githubusercontent.com/yuanyan3060/ArknightsGameResource/main/avatar/char_2025_shu_nlc%231.png" },
+        "battleSpine": {
+          "front": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Front/char_2025_shu_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Front/char_2025_shu_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Front/char_2025_shu_nlc_1.png" }
+          },
+          "back": {
+            "skel": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Back/char_2025_shu_nlc_1.skel" },
+            "atlas": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Back/char_2025_shu_nlc_1.atlas" },
+            "png": { "url": "https://raw.githubusercontent.com/fexli/ArknightsResource/main/spine/char_2025_shu/char_2025_shu_nlc_1/Back/char_2025_shu_nlc_1.png" }
+          }
+        }
+      },
       {
         "skinId": "char_2025_shu@nian#11",
         "stem": "char_2025_shu_nian_11",
