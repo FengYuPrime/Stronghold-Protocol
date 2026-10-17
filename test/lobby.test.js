@@ -2070,6 +2070,35 @@ describe('match player limit', () => {
     } finally { await t.done(); }
   });
 
+  test('a running match keeps room.state.stats coming (the HUD’s 在线 count moves during a match)', async () => {
+    // statsRefreshMs shortened: the lobby re-broadcasts a running room's state (with fresh stats) on that timer
+    const t = await boot({ statsRefreshMs: 30 });
+    try {
+      const { c: a, start } = await t.solo('A');
+      assert.equal(start.t, 'ok', JSON.stringify(start));
+      const first = await a.waitFor('room.state', (s) => s.inMatch && !!s.stats);
+      assert.deepEqual(first.stats, { matchPlayers: 1, matchOwners: 0, matchPlayerLimit: 20, online: 1 },
+        'the match-start room.state already carries the numbers');
+
+      // a second human enters a match: A is inside its own and hears the moved counts without leaving it
+      assert.equal((await t.solo('B')).start.t, 'ok');
+      const fresh = await a.waitFor('room.state', (s) => !!s.stats && s.stats.matchPlayers === 2, 3000);
+      assert.equal(fresh.inMatch, true, 'still the running match’s frame');
+      assert.deepEqual(fresh.stats, { matchPlayers: 2, matchOwners: 0, matchPlayerLimit: 20, online: 2 },
+        'online and the match count both moved while A was in a match');
+
+      // exactly this frame is what the HUD prints (ui/serverLoad.js serverLoadText withOnline)
+      const { serverLoadText } = await import('../public/js/ui/serverLoad.js');
+      const i18n = await import('../shared/i18n.js');
+      const prevLang = i18n.getLang?.() ?? 'zh';
+      i18n.setLang('zh');
+      try {
+        assert.equal(serverLoadText(fresh.stats, { withOnline: true }), '在线 2 人 · 对局 2/20 人',
+          '「在线 X 人 · 对局 N/M 人」 is built from the frame the HUD receives');
+      } finally { i18n.setLang(prevLang); }
+    } finally { await t.done(); }
+  });
+
   test('the client text: ERR_TEXT, the four packs and ui/serverLoad.js agree', async () => {
     assert.equal(ERR_TEXT.SERVER_FULL, '服务器对局已满，请稍后再试');
     const packs = {};

@@ -183,6 +183,9 @@ function MatchScreen() {
   const metricsSetting = useSettings().combatMetrics === true;
   // gameplay plugins (DESIGN §32.6): the HUD corner's MOD mark — re-rendered only when the room's content changes
   const modRoom = useStore((s) => (s.room?.content?.vanilla === false ? s.room : null), (a, b) => (a?.content ?? null) === (b?.content ?? null));
+  // 对局人数 (server/lobby.js matchStats → main.js store.stats): the HUD's 「在线 15 人 · 对局 12/20 人」. A separate
+  // subscription: `modRoom` is null in a plain room, so the count must not ride on it (ui/hud.js TopBar `stats`).
+  const serverStats = useStore((s) => s.stats, shallowEqual);
   // the room's spectator seats for the top bar's 观战席 capsule (ui/hud.js SpectatorPill; GitHub #120): room.state keeps coming
   // during the match, the list is replaced only when a seat changes — shallowEqual keeps an unrelated push from re-rendering
   const specFacts = useStore((s) => ({
@@ -1587,6 +1590,7 @@ function MatchScreen() {
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator}
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
+        stats=${serverStats}
         onDevGold=${devGoldHandler} onDevLp=${devLpHandler} />
 
       <div class="gm__bonds">

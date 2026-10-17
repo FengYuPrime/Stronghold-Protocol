@@ -195,6 +195,10 @@ export const LOBBY_DEFAULTS = Object.freeze({
   // once — the seats of rooms whose match runs (bots and spectator seats are none, a room still in its lobby is none).
   // A start that would exceed it is refused with ERR.SERVER_FULL. 0 = no limit.
   maxMatchPlayers: 20,
+  // 对局人数的刷新 (ui/serverLoad.js): while any room's match runs, room.state is re-broadcast with fresh
+  // `stats` at most this often, so a player *inside* a match sees 「在线 15 人 · 对局 12/20 人」 move (a frame otherwise
+  // only follows a seat change / welcome). 0 = only the frames that already existed.
+  statsRefreshMs: 15_000,
 });
 
 /** Official `singleReconnectTime` (s) when the data lacks it (constData, research 01 §1). */
@@ -224,6 +228,13 @@ function matchPlayerCap(v) {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) && n >= 0 ? n : LOBBY_DEFAULTS.maxMatchPlayers;
 }
+
+/**
+ * A comparable key of a `stats` object (matchStats): the stats refresh only re-broadcasts a room whose numbers moved.
+ * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number }} s
+ * @returns {string}
+ */
+const statsKey = (s) => `${s.matchPlayers}/${s.matchOwners}/${s.matchPlayerLimit}/${s.online}`;
 
 /**
  * @typedef {{ seat: number, playerId: string, name: string, isBot: boolean, ready: boolean,
@@ -439,6 +450,8 @@ export class Lobby {
     this.limitLog = { at: -Infinity, suppressed: 0 };
     /** log lines said once (warnOnce) */
     this.told = new Set();
+    /** the 对局人数 refresh while matches run (LOBBY_DEFAULTS.statsRefreshMs; refreshStats) */
+    this.statsTimer = null;
     /** a held visual set whose plugins changed on disk: its rooms' hosts are told (header "The room's plugins") */
     this.offStale = typeof plugins?.onStale === 'function' ? plugins.onStale((vs, ids) => this.pluginsChanged(vs, ids)) : null;
     /**
@@ -571,6 +584,37 @@ export class Lobby {
     const load = this.matchLoad();
     return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers,
       online: load.online };
+  }
+
+  /**
+   * 对局人数的刷新 (LOBBY_DEFAULTS.statsRefreshMs): a room whose match is running re-broadcasts its `room.state` with fresh
+   * `stats` when the numbers moved — a player inside a match otherwise hears from the hall only at match start, on a
+   * seat change or on welcome, so the HUD's 「在线 15 人」 would freeze for the length of the match. One timer for the
+   * whole lobby, armed when a match starts; it stops itself once no room has a match. Tests call it directly.
+   */
+  refreshStats() {
+    this.statsTimer = null;
+    let running = 0;
+    for (const room of this.rooms.values()) {
+      if (room.disposed || !room.match) continue;
+      running++;
+      const stats = this.matchStats();
+      if (room.statsSent === statsKey(stats)) continue;
+      this.broadcastState(room);
+    }
+    if (running) this.armStatsRefresh();
+  }
+
+  /** Arm the stats refresh if it is not running (one timer: refreshStats re-arms itself while matches run). */
+  armStatsRefresh() {
+    if (this.statsTimer) return;
+    const ms = Number(this.opts.statsRefreshMs);
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    const t = setTimeout(() => {
+      try { this.refreshStats(); } catch (e) { this.statsTimer = null; this.log.error('[lobby] stats refresh', e); }
+    }, ms);
+    t.unref?.();
+    this.statsTimer = t;
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -769,6 +813,7 @@ export class Lobby {
     this.graceTimers.clear();
     for (const t of this.resyncTimers.values()) clearTimeout(t);
     this.resyncTimers.clear();
+    if (this.statsTimer) { clearTimeout(this.statsTimer); this.statsTimer = null; }
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -1469,6 +1514,7 @@ export class Lobby {
       room.matchCount++;
       this.log.info(`[lobby] ${room.code} match #${room.matchCount} starting (${room.mode}/${room.difficulty}, ${seats.length} seats, seed ${seed}${modded ? `, content ${room.content.cs.slice(0, 8)}${match.hosted ? ' in its match host' : ''}` : ''})`);
       this.broadcastState(room);
+      this.armStatsRefresh();
       match.start();
     } catch (e) {
       this.log.error(`[lobby] ${room.code} match failed to start`, e);
@@ -1882,8 +1928,10 @@ export class Lobby {
 
   broadcastState(room) {
     if (room.disposed) return;
+    const stats = this.matchStats();
+    room.statsSent = statsKey(stats); // refreshStats skips a room whose numbers are already on their way
     if (this.trustedRuntime) {
-      const state = room.toState(this.matchStats()), prev = room.trustedPrevious;
+      const state = room.toState(stats), prev = room.trustedPrevious;
       const event = (name,extra={}) => this.trustedRuntime.event(name,{room:state,...extra});
       if (!prev) event('roomCreated');
       const before = new Set((prev?.seats || []).filter(Boolean).map(s => s.playerId));
@@ -1893,7 +1941,7 @@ export class Lobby {
       if (state.inMatch && !prev?.inMatch) event('matchStarted');
       room.trustedPrevious = state;
     }
-    const data = encode(room.toState(this.matchStats()));
+    const data = encode(room.toState(stats));
     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
   }
 

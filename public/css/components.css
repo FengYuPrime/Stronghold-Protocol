@@ -1154,5 +1154,20 @@
 .server-load__dot { flex: none; width: .05rem; height: .05rem; border-radius: 50%; background: currentColor; opacity: .8; }
 .server-load__text { font-family: var(--font-num); letter-spacing: .06em; }
 .server-load--full { border-color: var(--amber); color: var(--amber); }
-.server-load.gtop__load { height: .2rem; padding: 0 .06rem; font-size: calc(.11 * var(--t)); }
+/* The match HUD's copy (ui/hud.js TopBar): top-right corner, above the clock — a dark plaque and a live mint dot so the
+   count reads at a glance over the field. It is a flex item of .gtop__right (public/css/screens/game.css), never
+   display:none'd and never allowed to wrap out of the corner. */
+.server-load.gtop__load {
+  height: .22rem; padding: 0 .08rem; font-size: calc(.12 * var(--t));
+  background: rgba(8, 11, 10, .86); border-color: var(--line-2, var(--line)); color: var(--text-md);
+  box-shadow: 0 .04rem .16rem rgba(0, 0, 0, .55);
+}
+.server-load.gtop__load .server-load__dot { background: var(--mint-400); opacity: 1; box-shadow: 0 0 .06rem var(--mint-400); }
+.server-load.gtop__load.server-load--full { border-color: var(--amber); color: var(--amber); }
+.server-load.gtop__load.server-load--full .server-load__dot { background: var(--amber); box-shadow: none; }
+/* a narrow (phone, landscape) screen: keep the pill on one line inside the corner instead of pushing it out */
+@media (max-width: 900px) {
+  .server-load.gtop__load { font-size: max(calc(.11 * var(--t)), 10px); padding: 0 .06rem; letter-spacing: .02em; }
+  .server-load.gtop__load .server-load__dot { width: .05rem; height: .05rem; }
+}
 
