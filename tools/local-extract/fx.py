@@ -631,17 +631,49 @@ def est_live(ps):
 
 # ---- UnityPy side ---------------------------------------------------------------------------------------------------
 
+class Roots:
+    """A client's bundle roots: the base one (`…/Arknights_Data/StreamingAssets/AB/Windows`) and, when the client keeps
+    one, its hot-update overlay `…/Arknights_Data/PersistentData/Bundles` — the same relative layout, three directories
+    up. A bundle a hot update changed (`skinpack/…` once the outfit ships) is loaded from the overlay: that copy is the
+    one the client reads, so `pick` prefers it and `newest_first` is the order a scan merges in (overlay, then base); a
+    base copy is read only when the overlay has none. Without the overlay directory (another install layout, a bare
+    sample tree) `overlay` is None and every read is the base root's — the behaviour of a client whose hot updates only
+    ever touch bundles the base root does not hold."""
+
+    def __init__(self, base):
+        self.base = Path(base)
+        try:
+            ov = self.base.parents[2] / 'PersistentData' / 'Bundles'
+        except IndexError:                       # too shallow a path to sit in an Arknights_Data layout
+            ov = None
+        self.overlay = ov if ov is not None and ov.is_dir() else None
+
+    def newest_first(self):
+        """The roots in the client's load order: the hot-update overlay, then the base."""
+        return [self.overlay, self.base] if self.overlay is not None else [self.base]
+
+    def pick(self, rel):
+        """`rel` as the client resolves it: the overlay's copy when it has that file, else the base root's."""
+        if self.overlay is not None and (self.overlay / rel).is_file():
+            return self.overlay / rel
+        return self.base / rel
+
+
 def scan_cabs(ab_root, dirs=CAB_DIRS, files=CAB_FILES):
-    """CAB name (lower case) → absolute path of every bundle under `dirs` / `files`, from the UnityFS headers only."""
+    """CAB name (lower case) → absolute path of every bundle under `dirs` / `files`, from the UnityFS headers only.
+    The hot-update overlay is scanned first, so a CAB it holds shadows a same-named one of the base root (the copy the
+    client reads)."""
     import lz4.block
     from aklz4 import decompress_lz4ak
+    roots = ab_root if isinstance(ab_root, Roots) else Roots(ab_root)
     out = {}
     paths = []
-    for d in dirs:
-        base = Path(ab_root) / d
-        if base.is_dir():
-            paths += [p for p in base.rglob('*') if p.is_file() and p.suffix in ('.ab', '.bin')]
-    paths += [Path(ab_root) / f for f in files if (Path(ab_root) / f).is_file()]
+    for root in roots.newest_first():
+        for d in dirs:
+            base = root / d
+            if base.is_dir():
+                paths += [p for p in base.rglob('*') if p.is_file() and p.suffix in ('.ab', '.bin')]
+        paths += [root / f for f in files if (root / f).is_file()]
     for p in paths:
         try:
             for name in bundle_nodes(p, lz4.block, decompress_lz4ak):
@@ -692,12 +724,13 @@ def bundle_nodes(path, lz4block, lz4ak):
 
 class AssetEnv:
     """A UnityPy environment that loads the CABs a PPtr names on demand (scan_cabs), resolves PPtrs across files and
-    caches typetrees / script class names."""
+    caches typetrees / script class names. `ab_root` may be a `Roots` (its overlay then wins every relative read)."""
 
     def __init__(self, ab_root, cabs):
         import aklz4  # noqa: F401  (registers the LZ4AK decoder)
         import UnityPy
-        self.ab_root = Path(ab_root)
+        self.roots = ab_root if isinstance(ab_root, Roots) else Roots(ab_root)
+        self.ab_root = self.roots.base
         self.env = UnityPy.Environment()
         self.cabs = cabs
         self.loaded = {}
@@ -717,7 +750,8 @@ class AssetEnv:
         return self.loaded[path]
 
     def load_rel(self, rel):
-        return self.load(self.ab_root / rel)
+        """Load the bundle a relative path names — the hot-update overlay's copy when it has one (Roots.pick)."""
+        return self.load(self.roots.pick(rel))
 
     def _index(self):
         def walk(f):
@@ -1434,19 +1468,38 @@ def _containers(args):
     return rel, st.st_size, int(st.st_mtime), names
 
 
+CONTAINER_INDEX_VERSION = 2   # .cache/fx/*.json: 2 indexes the hot-update overlay too (1: the base root alone)
+CONTAINER_INDEX_FORMAT = 'fx-container-index'
+
+
 def container_index(ab_root, globs, cache_file, jobs, log):
-    """prefab name → bundle rel path over every bundle matching `globs` (cached per bundle by size + mtime)."""
-    try:
-        cache = json.loads(Path(cache_file).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        cache = {}
-    rels = sorted({p.relative_to(ab_root).as_posix() for g in globs for p in Path(ab_root).glob(g) if p.is_file()})
+    """prefab name → bundle rel path over every bundle matching `globs` in the client's roots — the hot-update overlay
+    first, then the base root (a prefab the overlay holds wins over a base namesake; the caller resolves the rel
+    through `Roots.pick`, so a shadowed rel is read from the overlay) — cached per bundle by size + mtime.
+
+    The cache names its format, its version and the roots it was built from: a file of the older layout (a bare
+    rel → record map), or one built while the client had no overlay (or another one), is discarded and every bundle is
+    read again. A stale index would be missing exactly the overlay's keys, and the run would skip them as unknown."""
+    roots = ab_root if isinstance(ab_root, Roots) else Roots(ab_root)
+    scope = [str(r) for r in roots.newest_first()]
+    doc = _read_json(cache_file)
+    if not (isinstance(doc, dict) and doc.get('format') == CONTAINER_INDEX_FORMAT
+            and doc.get('version') == CONTAINER_INDEX_VERSION and doc.get('roots') == scope):
+        doc = {'format': CONTAINER_INDEX_FORMAT, 'version': CONTAINER_INDEX_VERSION, 'roots': scope, 'bundles': {}}
+    cache = doc['bundles'] if isinstance(doc.get('bundles'), dict) else {}
+    rels = {}                       # rel → the root it is read from; the overlay's copy shadows the base root's
+    for r in roots.newest_first():
+        for g in globs:
+            for p in r.glob(g):
+                if p.is_file():
+                    rels.setdefault(p.relative_to(r).as_posix(), r)
+    order = {s: i for i, s in enumerate(scope)}
     todo = []
-    for rel in rels:
-        st = (Path(ab_root) / rel).stat()
+    for rel, r in rels.items():
+        st = (r / rel).stat()
         c = cache.get(rel)
-        if not c or c.get('size') != st.st_size or c.get('mtime') != int(st.st_mtime):
-            todo.append((str(ab_root), rel))
+        if not c or c.get('root') != str(r) or c.get('size') != st.st_size or c.get('mtime') != int(st.st_mtime):
+            todo.append((str(r), rel))
     if todo:
         t0 = time.time()
         if jobs > 1 and len(todo) > 4:
@@ -1455,12 +1508,13 @@ def container_index(ab_root, globs, cache_file, jobs, log):
         else:
             results = [_containers(a) for a in todo]
         for rel, size, mtime, names in results:
-            cache[rel] = {'size': size, 'mtime': mtime, 'prefabs': names}
+            cache[rel] = {'root': str(rels[rel]), 'size': size, 'mtime': mtime, 'prefabs': names}
         log(f'  container index: {len(todo)} bundles read in {time.time() - t0:.1f}s')
+        doc['bundles'] = {r: cache[r] for r in rels if r in cache}
         Path(cache_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(cache_file).write_text(json.dumps({r: cache[r] for r in rels if r in cache}), encoding='utf-8')
+        Path(cache_file).write_text(json.dumps(doc), encoding='utf-8')
     out = {}
-    for rel in rels:
+    for rel in sorted(rels, key=lambda rel: (order[str(rels[rel])], rel)):   # overlay first: its prefabs win
         for n in cache.get(rel, {}).get('prefabs', []):
             out.setdefault(n, rel)
     return out
@@ -2880,7 +2934,7 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
         try:
             if uid.startswith('char_'):
                 rel = f'charpack/{uid}.ab'
-                u = parse_unit(env, rel, uid, 'char') if (Path(ab_root) / rel).exists() else None
+                u = parse_unit(env, rel, uid, 'char') if env.roots.pick(rel).is_file() else None
             elif uid.startswith('enemy_'):
                 rel = enemy_idx.get(uid)
                 u = parse_unit(env, rel, uid, 'enemy') if rel else None
@@ -2956,7 +3010,7 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
             if uid.startswith('char_'):
                 arts = f'chararts/{uid}.ab'
                 pts = skin_points(env, arts, 'defaultskin', u.get('graphic'), container=f'/{uid}/defaultskin.prefab') \
-                    if (Path(ab_root) / arts).exists() else None
+                    if env.roots.pick(arts).is_file() else None
                 src = f'{arts} defaultskin'
             else:
                 pts, src = skin_points(env, rel, uid, None), f'{rel} {uid}'
@@ -3001,7 +3055,33 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
     return units, projectiles, skills, skins, referenced
 
 
-def skin_hooks(ab_root, cabs, units, log):
+def official_skin_ids(root):
+    """Every skin id `data/skins.json` lists, case-folded → the spelling it uses there (`char_1033_swire2@
+    ambienceSynesthesia#4`). A prefab's own name is lower case (`char_1033_swire2_ambiencesynesthesia#4`), so the case
+    the catalogue spells is the one index.json must key on; {} when the file is missing (ids keep the prefab's case)."""
+    try:
+        doc = json.loads((Path(root) / 'data' / 'skins.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError):
+        return {}
+    out = {}
+    for rec in ((doc or {}).get('chars') or {}).values():
+        for s in (rec if isinstance(rec, list) else (rec or {}).get('skins') or []):
+            i = (s or {}).get('id') if isinstance(s, dict) else None
+            if isinstance(i, str) and i:
+                out.setdefault(i.lower(), i)       # the first spelling wins; unique in practice (one id, one skin)
+    return out
+
+
+def skin_id(cid, prefab, official):
+    """The official skin id of a skin prefab: `<charId>@<prefab name minus the charId>` (`char_x_grp#n` →
+    `char_x@grp#n`), re-spelled as `official` (lower case id → catalogue id) spells it — the prefab names the group /
+    #n in lower case (`@ambiencesynesthesia#4`) while the catalogue and the fork's data keep the official case. An id
+    the catalogue does not list is left exactly as the prefab names it."""
+    sid = f'{cid}@{prefab[len(cid) + 1:]}'
+    return official.get(sid.lower(), sid)
+
+
+def skin_hooks(ab_root, cabs, units, log, root=None):
     """index.json's `skinFx` (换装, §33.12 Skin hook): every battle skin's own effect prefabs and mount points.
 
     A skin's battle prefab (`skinpack/<charId>.ab`, container `dyn/battle/prefabs/skins/character/<charId>/<prefab>.prefab`)
@@ -3011,15 +3091,18 @@ def skin_hooks(ab_root, cabs, units, log):
     do (`skin_points`), so an effect sits on the outfit's bones. The entry is keyed by the official skin id
     (`char_x@grp#n`: the fork's `info.skin`, ui/skins.js) and holds only what the prefab names; a skin whose prefab names
     none is left out, and the runtime keeps the unit's own effects. `units` is the crawl of `crawl_units`: only the
-    operators it holds are read (their `graphic` places a skin's points), so a sample run scans the sample's outfits."""
-    ab_root = Path(ab_root)
+    operators it holds are read (their `graphic` places a skin's points), so a sample run scans the sample's outfits.
+    `skinpack/<cid>.ab` is read from the hot-update overlay when the client has one there (`Roots.pick`): the copy the
+    base root holds can be the pre-hot-update pack, without the outfits that shipped after it."""
+    roots = ab_root if isinstance(ab_root, Roots) else Roots(ab_root)
+    official = official_skin_ids(root) if root else {}
     out, pairs, with_points = {}, 0, 0
     for cid in sorted(u for u in units if u.startswith('char_')):
         rel = f'skinpack/{cid}.ab'
-        if not (ab_root / rel).exists():
+        if not roots.pick(rel).is_file():
             continue
         graphic = (units.get(cid) or {}).get('graphic')
-        env = AssetEnv(ab_root, cabs)
+        env = AssetEnv(roots, cabs)
         try:
             prefabs = env.prefabs(rel, full=True)
         except Exception as e:
@@ -3063,13 +3146,39 @@ def skin_hooks(ab_root, cabs, units, log):
                 e['points'] = pts
                 e['graphic'] = graphic
                 with_points += 1
-            out[f'{cid}@{prefab[len(cid) + 1:]}'] = e      # char_x@grp#n, the official skin id
+            out[skin_id(cid, prefab, official)] = e          # char_x@grp#n, the official skin id
             pairs += len(replace)
             found += 1
         if found:
             log(f'  skin {cid}: {found} outfits with hooks')
     log(f'fx: {len(out)} battle skins with hooks ({pairs} replaced effect keys, {with_points} with mount points)')
     return out
+
+
+def skin_referenced(skinfx, eff=None):
+    """Every effect key index.json's `skinFx` names (§33.12): BOTH sides of a `replace` pair, and the prefabs a fake
+    projectile config names.
+
+    A pair is `fromEffect` → `toEffect`: the unit's own key (the base, `fromEffect`) is what the outfit draws
+    `toEffect` in place of — both are played in a match, the base by every other outfit and by the default one. The
+    prefab names only the variant, so nothing else in the client or our data names the base, and a used set built from
+    the variants alone exports no key for it: 黍's S3 draws the one-tile ground decal `shu_talent_buff_02`, whose
+    `_nian#11` / `_nlc#1` variants were exported while the base key was not — the default outfit's S3 had no decal.
+    A `fakeProjectiles` entry names projectile prefabs (`originProjectileKey` / `graphicProjectileKey` /
+    `logicProjecitleKey`, the client's spelling), not effect prefabs: those live in `battle/prefabs/[uc]projectiles.ab`
+    and are crawled with the units, so `eff` (the client's effect keys) keeps only a string that really is an effect
+    prefab — this client names none (0 of 370 outfit configs), and unfiltered they would only log a "no such effect
+    prefab" skip line each."""
+    out = set()
+    for e in (skinfx or {}).values():
+        e = e or {}
+        for a, b in (e.get('replace') or {}).items():
+            out.update(k for k in (a, b) if isinstance(k, str) and k)     # both sides: the base is named only here
+        for q in e.get('fakeProjectiles') or []:
+            for v in (q or {}).values():
+                if isinstance(v, str) and v and (eff is None or v.lower() in eff):
+                    out.add(v)
+    return {k.lower() for k in out}
 
 
 # ---- the run ----------------------------------------------------------------------------------------------------------
@@ -3220,7 +3329,8 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     data/local-assets.json) gets nothing: extract.py drops the fx groups an earlier run left there (ran_groups). A
     --fx-keys run (`keys`) updates those prefabs in the earlier set's index and file list."""
     t_start = time.time()
-    ab_root = Path(ab_root)
+    roots = ab_root if isinstance(ab_root, Roots) else Roots(ab_root)
+    ab_root = Path(roots.base)
     root = Path(root) if root else Path(__file__).resolve().parents[2]
     fx_manifest = Path(fx_manifest) if fx_manifest else root / 'data' / FX_MANIFEST
     jobs = max(1, jobs or min(8, os.cpu_count() or 2))
@@ -3230,7 +3340,7 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
 
     t0 = time.time()
     cabs = scan_cabs(ab_root)
-    eff = container_index(ab_root, EFFECT_GLOBS, root / '.cache/fx/effects.json', jobs, log)
+    eff = container_index(roots, EFFECT_GLOBS, root / '.cache/fx/effects.json', jobs, log)
     timings['index'] = time.time() - t0
     log(f'fx: {len(eff)} effect prefabs in the client ({client_version(ab_root)}), {len(cabs)} bundle CABs scanned')
 
@@ -3249,11 +3359,13 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     units, projectiles, skills, skins, referenced = crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log)
     timings['units'] = time.time() - t0
 
-    # 换装: the outfits of the operators crawled, their own effect keys and mount points (§33.12 Skin hook). The keys
-    # they play instead of the unit's own are part of the used set — without them a skin has nothing to draw.
+    # 换装: the outfits of the operators crawled, their own effect keys and mount points (§33.12 Skin hook). A pair
+    # names both the unit's key and the outfit's (`skin_referenced`: the base is named by no other data), so both are
+    # part of the used set — without them a skin, or the default outfit of a unit whose skins replace the key, has
+    # nothing to draw.
     t0 = time.time()
-    skinfx = skin_hooks(ab_root, cabs, units, log)
-    referenced |= {k for e in skinfx.values() for k in (e.get('replace') or {}).values()}
+    skinfx = skin_hooks(ab_root, cabs, units, log, root=root)
+    referenced |= skin_referenced(skinfx, eff)
     timings['skins'] = time.time() - t0
 
     generic = {v for group in FX_GENERIC.values() for v in group.values()}

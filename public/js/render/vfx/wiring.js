@@ -492,14 +492,16 @@ export class FxWiring {
   }
 
   /**
-   * Spawn an effect key on a view (o: { toward (view|point), flipFrom (view), track, follow, stick, strike, loop,
-   * important, skip, data }): at its FollowMountPoint's point when it has one — the client keeps it there from its first
-   * frame, with the point's rotation unless `_keepOriginRotation` (a weapon effect rides its bone: 安洁莉娜's staff glow,
-   * 灰毫's muzzle flash; a 驭械术士's floating unit its Special point) —, else at its spawn location (MUZZLE_POINT and the
-   * Special points with the point's rotation; DESIGN §33.11). `follow`: a held effect (a status, an aura, a skill's or
+   * Spawn an effect key on a view (o: { toward (view|point), flipFrom (view), skinFrom (view), track, follow, stick,
+   * strike, loop, important, skip, data }): at its FollowMountPoint's point when it has one — the client keeps it there
+   * from its first frame, with the point's rotation unless `_keepOriginRotation` (a weapon effect rides its bone:
+   * 安洁莉娜's staff glow, 灰毫's muzzle flash; a 驭械术士's floating unit its Special point) —, else at its spawn location
+   * (MUZZLE_POINT and the Special points with the point's rotation; DESIGN §33.11). `skinFrom`: the unit whose outfit the
+   * key is replaced by (default: the view it is placed on). `follow`: a held effect (a status, an aura, a skill's or
    * a talent's loop) keeps to the unit — a FollowOwner / FollowTileHeight one to its feet, any other moves with it as
    * a `_holdByOwner` prefab does —; `stick`: the effect keeps to the view's spawn point while it lives (what a projectile
-   * places on its target); `strike`: the points as the attack clip poses them at its strike frame. A prefab not loaded
+   * places on its target); `strike`: the points as the attack clip poses them at its strike frame; `decal`: a ground
+   * decal, outside the effects budget (OfficialFx `_room`; skills.js FX_BINDINGS `decal`). A prefab not loaded
    * yet is placed by index.json's summary (`prefabs[key].spawn`, and `follow`: its FollowMountPoint's point, followed
    * from the first frame) and takes up its rotation, direction and pause behaviours once it has loaded (an idle loop
    * started in the battle's first frames used to sit at the HitPoint for good).
@@ -509,8 +511,11 @@ export class FxWiring {
     if (!k || !this.ofx.lib.has(k)) return null;
     let def = this.ofx.lib.def(k);
     // 换装: the outfit the view wears plays its own prefab in place of the unit's (`skinKey`; the extraction holds
-    // both, so a skin the local set has no replacement for keeps the base one) — DESIGN §33.12 Skin hook
-    const sk = lc(this.skinKey(v, k));
+    // both, so a skin the local set has no replacement for keeps the base one) — DESIGN §33.12 Skin hook. `o.skinFrom`:
+    // a prefab placed on one unit but played by another's animation — an attack's hit rows and its projectile's onHit
+    // (`_arrive`) are the attacker's, so a worn outfit replaces them even on an enemy with none (烛煌 S3's
+    // blaze2_skill_03_hit → _winter#5 on the target she hits)
+    const sk = lc(this.skinKey(o.skinFrom || v, k));
     if (sk && sk !== k && this.ofx.lib.has(sk)) { k = sk; def = this.ofx.lib.def(k); }
     if (def && def.switchable) {
       const alt = lc(this._variant(def.switchable, v, this.pose(v)));
@@ -526,7 +531,7 @@ export class FxWiring {
     if (P.onGround) pos[2] = -ground;
     const place = { pos, groundZ: -ground, yaw: 0, mirror: false, flipY: false, mountRot: P.rotKind ? mountRotation(skin, P.rotKind, pose) : null };
     this._orient(def, place, pose, o, v);
-    const opts = { track: o.track || null, data: o.data ?? null, loop: !!o.loop, important: !!o.important, skip: o.skip > 0 ? o.skip : 0, owner: v };
+    const opts = { track: o.track || null, data: o.data ?? null, loop: !!o.loop, important: !!o.important, decal: !!o.decal, skip: o.skip > 0 ? o.skip : 0, owner: v };
     // the owner each frame: FollowMountPoint keeps the effect on the unit's point (and its rotation), a held effect
     // moves with the unit (`keep`), FollowDirection turns it with the unit, PauseEffectIf hides it while the unit shows
     // a condition; a prefab with chained effects (OnPlayEmitter: system.js FxHandle._start hands them this track) has
@@ -1105,10 +1110,11 @@ export class FxWiring {
     const go = () => {
       const now = this.ofx.time;
       if (tgt && !tgt.destroyed) {
-        for (const k of proj.onHit || []) this.playOn(k, tgt, {});
+        // the projectile's and the attack's rows are the shooter's animation: an outfit replaces them on the target too
+        for (const k of proj.onHit || []) this.playOn(k, tgt, { skinFrom: src || undefined });
         if (rows) {
           const own = new Set((proj.onHit || []).map(lc));
-          for (const h of rows) if (!own.has(lc(h.k))) this.playOn(h.k, tgt, { flipFrom: src || undefined, toward: h.along && src ? beyond(src, tgt) : undefined });
+          for (const h of rows) if (!own.has(lc(h.k))) this.playOn(h.k, tgt, { flipFrom: src || undefined, skinFrom: src || undefined, toward: h.along && src ? beyond(src, tgt) : undefined });
         }
         const id = tgt.id ?? tgt.info?.id;
         this.arrived.set(id, now);

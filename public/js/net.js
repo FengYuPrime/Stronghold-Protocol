@@ -6,7 +6,9 @@
 //   close ⇒ reconnect). Measured from the oldest unanswered ping, not from the last inbound frame,
 //   so a background tab whose timers the browser throttles to ~1/min is not mistaken for dead.
 // - On every (re)connect, once a player name is known, sends `hello {name, token, version}`;
-//   the session is "online" after `welcome`.
+//   the session is "online" after `welcome`. A page opened with `?owner=<key>` also sends `hello.owner`
+//   (the server's SP_OWNER_TOKEN, server/http/config.js ownerToken): the server marks that session as the
+//   owner's — never refused by the match-player limit. A wrong key grants nothing and is never echoed back.
 // - `request(t, fields)` adds a `rid` and resolves on the matching `ok` (or any reply carrying the
 //   rid), rejects with a NetError on `error` or after REQUEST_TIMEOUT_MS. Requests made while
 //   reconnecting are queued and flushed after `welcome` (still bound by their timeout).
@@ -102,6 +104,23 @@ export function defaultWsUrl(loc = globalThis.location) {
   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
 }
 
+/**
+ * The 服主 key of this page's URL (`?owner=<key>`, the server's `SP_OWNER_TOKEN`), or null: the privilege the server
+ * grants the session that presents it (never refused by the match-player limit, server/lobby.js Lobby.start). Read from
+ * the URL only — never stored, never shown, never logged; the server neither echoes it nor says whether it was right.
+ * @param {{search?: string} | null} [loc]
+ * @returns {string | null}
+ */
+export function ownerKeyFrom(loc = globalThis.location) {
+  try {
+    const search = loc && typeof loc.search === 'string' ? loc.search : '';
+    const m = /[?&]owner=([^&#]*)/.exec(search);
+    if (!m) return null;
+    const key = decodeURIComponent(m[1]);
+    return key && key.length <= 128 ? key : null;
+  } catch { return null; }
+}
+
 const WS_OPEN = 1;
 const WS_CONNECTING = 0;
 
@@ -115,6 +134,7 @@ export class Net {
    * @param {any} [opts.WebSocket] WebSocket constructor (default: globalThis.WebSocket)
    * @param {() => (string|null)} [opts.getToken] reconnect-token provider for `hello`
    * @param {() => ({ noReplace: boolean, claimAt?: number })} [opts.getTokenClaim] local ownership for this hello
+   * @param {() => (string|null)} [opts.getOwner] the 服主 key for `hello.owner` (default: ownerKeyFrom, the page URL)
    * @param {() => number} [opts.now]
    * @param {() => number} [opts.random]
    * @param {{setTimeout: Function, clearTimeout: Function, setInterval: Function, clearInterval: Function}} [opts.timers]
@@ -124,6 +144,7 @@ export class Net {
     this.WS = opts.WebSocket || null;
     this.getToken = typeof opts.getToken === 'function' ? opts.getToken : () => null;
     this.getTokenClaim = typeof opts.getTokenClaim === 'function' ? opts.getTokenClaim : () => null;
+    this.getOwner = typeof opts.getOwner === 'function' ? opts.getOwner : () => ownerKeyFrom();
     this.now = opts.now || (() => Date.now());
     this.random = opts.random || Math.random;
     this.timers = opts.timers || {
@@ -375,6 +396,10 @@ export class Net {
       if (claim?.noReplace) msg.noReplace = true;
       if (Number.isFinite(claim?.claimAt)) msg.claimAt = claim.claimAt;
     }
+    // 服主特权 (ownerKeyFrom): the key of this page's URL, if any — a wrong one changes nothing on the server
+    let owner;
+    try { owner = this.getOwner(); } catch { owner = null; }
+    if (typeof owner === 'string' && owner.length > 0 && owner.length <= 128) msg.owner = owner;
     this._helloToken = token;
     this._helloRid = rid;
     this._helloSentName = this.name;

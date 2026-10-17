@@ -19,6 +19,7 @@ import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
+import { ServerLoad } from '../ui/serverLoad.js';
 import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
 import { net, identity } from '../net.js';
@@ -243,6 +244,8 @@ function DifficultyCard({ roomMode, difficulty, selected, onSelect }) {
 export function LobbyScreen() {
   const me = useStore((s) => s.me, shallowEqual);
   const conn = useStore((s) => s.connection, shallowEqual);
+  // 对局人数 (server/lobby.js matchStats): 「对局 12/20 人」 — the server's own occupancy, from welcome / room.state
+  const serverStats = useStore((s) => s.stats, shallowEqual);
   useData('config');
   const [roomMode, setRoomMode] = useState(() => (loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop'));
   const [difficulty, setDifficulty] = useState(() => {
@@ -321,6 +324,7 @@ export function LobbyScreen() {
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
       </div>
       <div class="topbar__right">
+        <${ServerLoad} stats=${serverStats} />
         <${ResumeMatchButton} />
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
         <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>

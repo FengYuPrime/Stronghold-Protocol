@@ -60,6 +60,8 @@ export class BattlePlayers {
       const owner = ps.units.find((x) => x.kind === 'op' && x.uid === inp.ownerUid);
       if (!owner) continue;
       t.ownerUnit = owner;
+      // 换装 (召唤物皮肤): linked after the fact, the token still wears its owner's outfit (players.js _makeAlly)
+      if (!t.skin) t.skin = owner.skin ?? null;
       const def = inp.def ? null : this._tokenDef(inp.tokenId ?? inp.chessId, owner, null);
       if (!def || def === t.def) continue;
       const st = def.stats;
@@ -186,7 +188,9 @@ export class BattlePlayers {
     const u = new Unit({
       id: ++this._idSeq, side: 'ally', kind, def, defId: def.id, name: def.name, ownerId: ps ? ps.playerId : null,
       uid: extra.uid ?? null, ownerUnit: extra.ownerUnit ?? null, x: c, y: r, tileR: r, tileC: c,
-      skin: extra.skin ?? null,
+      // 换装 (召唤物皮肤): a summon wears its owner's outfit — the renderer uses it to pick the token model the official
+      // `tokenSkinMap` names (assets.js tokenSkinSpine); display only, no battle value (see Unit.skin)
+      skin: extra.skin ?? extra.ownerUnit?.skin ?? null,
       dir: extra.dir != null ? normDir(extra.dir) : extra.facing != null ? normDir(extra.facing) : ps ? ps.dir : 'RIGHT',
       base: {
         maxHp: st.maxHp, atk: st.atk, def: st.def, res: st.res, aspd: st.aspd, bat: st.bat, blockCnt: st.blockCnt,

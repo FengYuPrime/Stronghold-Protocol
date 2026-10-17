@@ -16,9 +16,11 @@ import { skillPlan, lifeOf, shotOf, mountPointType } from '../../public/js/rende
 
 const BLOCKED = 1, STEALTH = 8, SKILL = 16;
 const LOOPING = new Set(['dep_buff', 'mode_buff', 'atk_buff', 'reb_loop', 'reb_inv', 'reb_post', 'common_invisible', 'blk_buff', 'unblk_buff', 'aura_loop', 'gen_loop', 'never_buff',
-  'bar_loop', 'enr_loop']);
+  'bar_loop', 'enr_loop', 'shu_talent_buff_01', 'decoy_hit_plot', 'tile_talent_loop']);
 const KEYS = [...LOOPING, 'dep_birth', 'reb_end', 'reb_hit', 'doll_start', 'def_cast', 'stand_cast', 'sk_trig', 'exa_cast', 'exa_hit', 'pj_cast',
-  'lv_hit', 'lv_lim', 'lv_inf', 'lv_once', 'g_hit', 'g_enemy', 'g_heal', 'g_die', 'g_birth', 'sh_cast'];
+  'lv_hit', 'lv_lim', 'lv_inf', 'lv_once', 'g_hit', 'g_enemy', 'g_heal', 'g_die', 'g_birth', 'sh_cast', 'shu_talent_once'];
+// the spawn locations of the fallback test's prefabs (SPAWN_LOCATIONS: 5 GROUND_CENTER, 17 TILE_CENTER)
+const SPAWN = { shu_talent_buff_01: 5, decoy_hit_plot: 5, tile_talent_loop: 17, shu_talent_once: 5 };
 const PROJ = ['proj_a', 'proj_b', 'proj_c', 'proj_z_s1', 'proj_m'];
 
 const use = (role, key, o = {}) => ({ role, keys: [key], from: 'UberEffectEmitter._castEffects', ...o });
@@ -26,7 +28,7 @@ const buff = (role, key, cls, o = {}) => ({ role, keys: [key], from: `${cls}._bu
 const melee = (cast, extra = {}) => ({ class: 'MeleeAttack', cast: cast.map((k) => ({ effects: [k], startEvent: 2, endEvent: 3, oneshot: 1 })), hit: [], ...extra });
 
 function makeIndex() {
-  const prefabs = Object.fromEntries(KEYS.map((k) => [k, { file: `prefabs/${k}.json`, looping: LOOPING.has(k) }]));
+  const prefabs = Object.fromEntries(KEYS.map((k) => [k, { file: `prefabs/${k}.json`, looping: LOOPING.has(k), ...(k in SPAWN ? { spawn: SPAWN[k] } : {}) }]));
   return {
     format: 'fx-index', version: 3,
     units: {
@@ -111,6 +113,16 @@ function makeIndex() {
       // attack with a mount group
       char_807_proj: {
         kind: 'char', skills: {}, modes: [{ name: 'Default', attack: { class: 'RangedAttack', projectileKey: 'proj_m', mount: 'SPECIAL_0', mountGroup: { loop: 'LOOP', mounts: ['SPECIAL_6', 'SPECIAL_7'] }, cast: [], hit: [] } }],
+      },
+      // a talent the data places nowhere: `uses` empty, its effect exported but unclassified (黍's 天赋 1 as the
+      // extractor writes it) — beside keys that are another node's effect and must stay unbound
+      char_809_shu: {
+        kind: 'char', skills: {}, modes: [{ name: 'Default', attack: melee([]) }],
+        talents: { 1: {
+          nodes: [{ node: 'Others/Direction/Talents/1', class: 'Talent', ability: 'PassiveBuffAbility', when: 'passive' },
+            { node: 'Others/Direction/Talents/1', class: 'Talent', ability: null, when: null }],
+          effects: ['shu_talent_buff_01', 'decoy_hit_plot', 'shu_talent_once', 'tile_talent_loop'], projectiles: [], uses: [], roles: {},
+          unclassified: ['shu_talent_buff_01', 'decoy_hit_plot', 'shu_talent_once', 'tile_talent_loop'], abilities: [] } },
       },
     },
     skills: {
@@ -207,6 +219,24 @@ describe('talents in force and their bindings (talents.js)', () => {
     assert.deepEqual(triggerKinds({ triggers: [{ event: 'ON_SKILL_START' }, { event: 'ON_OWNER_BORN' }, { event: 'ON_TAKE_DAMAGE' }] }), ['skill', 'born']);
     const binds = talentBindings(idx, 'char_805_exa', { rec: RECS.char_805_exa });
     assert.deepEqual(bindable(binds[0]), { ok: false, reason: 'attack' });
+  });
+
+  test("a talent the data places nowhere (`uses: []` + `unclassified`) plays its own effect on the owner — 黍's 天赋 1 —; its other keys stay unbound and a talent with uses keeps exactly them", () => {
+    const idx = makeIndex();
+    const b = talentBindings(idx, 'char_809_shu', { info: { skillIndex: 0 }, rec: { charId: 'char_809_shu', talents: [{ index: 0 }] } });
+    assert.equal(b.length, 2);
+    assert.deepEqual(bindable(b[0]), { ok: true, reason: null });
+    assert.deepEqual(b[0].plan.loop.map((e) => [e.key, e.at, e.hold, e.point]), [['shu_talent_buff_01', 'owner', 'skill', 'GROUND_CENTER']]);
+    assert.deepEqual(b[0].plan.unmapped, []);
+    // the same path's second node plays nothing (one node carries the fallback), and only a loop named after a talent on
+    // the owner is one: a key naming no talent, a one-shot and a tile spawn stay unbound
+    assert.deepEqual(b[1].plan.loop, []);
+    assert.deepEqual(bindable(b[1]), { ok: false, reason: 'no-effects' });
+    assert.equal(b[0].uses, 1);
+    // a talent whose uses the data gives keeps them: the fallback never adds to one
+    const dep = talentBindings(idx, 'char_800_dep', { info: { skillIndex: 0 }, rec: RECS.char_800_dep });
+    assert.deepEqual(dep[0].plan.loop.map((e) => e.key), ['dep_buff']);
+    assert.equal(dep[0].uses, 1);
   });
 });
 
@@ -306,6 +336,17 @@ describe('talent and ability effects in a battle (talentfx.js)', () => {
     assert.equal(live('bar_loop'), 1, 'raised again');
     e.hp = 45; frame();
     assert.equal(live('enr_loop'), 1);
+  });
+
+  test("黍's fallback talent loop: the owner's own effect loops from the deploy and stops with it", async () => {
+    const { w, log, view, frame, live } = await setup({ char_809_shu: { charId: 'char_809_shu', talents: [{ index: 0 }] } });
+    const v = view(1, 'char_809_shu');
+    w.deploy(v); frame();
+    assert.equal(live('shu_talent_buff_01'), 1);
+    assert.ok(!log.includes('decoy_hit_plot') && !log.includes('shu_talent_once') && !log.includes('tile_talent_loop'),
+      'the keys the fallback leaves out never play');
+    w.death(v); v.alive = false; frame();
+    assert.equal(live('shu_talent_buff_01'), 0);
   });
 
   test("an enemy's deploy talent (AppearSyncedTalent aura) loops from its spawn; a general ability only in its mode", async () => {

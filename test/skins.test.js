@@ -179,3 +179,133 @@ test('the catalogue covers most of this version’s operators (a missing char si
   assert.ok(charIds.size > 100);
   assert.ok(covered.length / charIds.size > 0.7, `${covered.length}/${charIds.size} operators have skins`);
 });
+
+// ---- 召唤物换装 (the official tokenSkinMap) ----------------------------------------------------------------
+
+/** The cached official table (`node tools/skins.mjs inject` reads the same file); absent on a checkout that never ran it. */
+function skinTable() {
+  const abs = path.join(ROOT, '.cache', 'skin-table.json');
+  return fs.existsSync(abs) ? JSON.parse(fs.readFileSync(abs, 'utf8')) : null;
+}
+
+test('tokenSkinMapOf: the official tokenSkinMap of an outfit (null for most, [{ tokenId, tokenSkinId }] for the rest)', async () => {
+  const { tokenSkinMapOf } = await import('../tools/skins.mjs');
+  // shape as in .cache/skin-table.json: `tokenSkinMap: null` on a normal outfit, an array of pairs on one that re-models
+  // a summon; malformed members are dropped instead of reaching the manifest
+  const table = {
+    charSkins: {
+      'char_x@plain#1': { skinId: 'char_x@plain#1', tokenSkinMap: null },
+      'char_x@aura#2': {
+        skinId: 'char_x@aura#2',
+        tokenSkinMap: [{ tokenId: 'token_a', tokenSkinId: 'token_a_aura#2' }, { bad: 1 }, { tokenId: 5, tokenSkinId: 'x' }, null],
+      },
+    },
+  };
+  assert.deepEqual(tokenSkinMapOf(table, 'char_x@plain#1'), []);
+  assert.deepEqual(tokenSkinMapOf(table, 'char_x@aura#2'), [{ tokenId: 'token_a', tokenSkinId: 'token_a_aura#2' }]);
+  assert.deepEqual(tokenSkinMapOf(null, 'char_x@aura#2'), []);
+  assert.deepEqual(tokenSkinMapOf({ charSkins: {} }, 'nope'), []);
+
+  // the real table carries the reported case: 琳琅诗怀雅's 律动方格 and 盛世之象 both re-model the 香槟炸弹
+  const real = skinTable();
+  if (!real) return;
+  assert.deepEqual(tokenSkinMapOf(real, 'char_1033_swire2@ambienceSynesthesia#4'), [
+    { tokenId: 'token_10031_swire2_gdtrap', tokenSkinId: 'token_10031_swire2_gdtrap_ambienceSynesthesia#4' },
+  ]);
+  assert.deepEqual(tokenSkinMapOf(real, 'char_1033_swire2@nlc#1'), [
+    { tokenId: 'token_10031_swire2_gdtrap', tokenSkinId: 'token_10031_swire2_gdtrap_nlc#1' },
+  ]);
+  assert.deepEqual(tokenSkinMapOf(real, 'char_285_medic2#1'), [], 'a default outfit swaps no token');
+});
+
+test('inject’s join: an outfit gets its summons’ models only where the files are on disk', async (t) => {
+  const { tokenSkinEntries } = await import('../tools/skins.mjs');
+  const table = skinTable();
+  if (!table) return t.skip('no .cache/skin-table.json (tools/skins.mjs has not fetched it)');
+  const skinId = 'char_1033_swire2@ambienceSynesthesia#4';
+  // the map names token_10031_swire2_gdtrap_ambienceSynesthesia#4 → the flat site folder of the token, file named by stem
+  const stem = 'token_10031_swire2_gdtrap_ambienceSynesthesia_4';
+  const skel = path.join(ROOT, 'public', 'assets', 'spine', 'token', 'token_10031_swire2_gdtrap', `${stem}.skel`);
+  if (!fs.existsSync(skel)) return t.skip('the skin-variant token model is not installed on this checkout');
+  const entries = await tokenSkinEntries(manifest, skinId, table);
+  const e = entries.token_10031_swire2_gdtrap;
+  assert.ok(e, 'the outfit contributes a model for the bottle');
+  assert.equal(e.tokenSkinId, 'token_10031_swire2_gdtrap_ambienceSynesthesia#4');
+  assert.equal(e.spine.skel, `/assets/spine/token/token_10031_swire2_gdtrap/${stem}.skel`);
+  assert.equal(e.spine.skel.replace(/\.skel$/, '.atlas'), e.spine.atlas, 'the atlas sits next to the skeleton');
+  assert.ok(e.spine.anims && e.spine.anims.idle, 'anims resolved: the client validSpine() accepts it');
+  // an outfit with no tokenSkinMap contributes nothing (the summons keep their own model)
+  assert.deepEqual(await tokenSkinEntries(manifest, 'char_285_medic2#1', table), {});
+});
+
+test('inject maps every numbered skill clip of an outfit’s own skeleton (her S3 stance, not the attack swing)', async (t) => {
+  const { resolveSkinSpineFromDisk } = await import('../tools/skins.mjs');
+  // `inject` resolves a skin on its own (data/assets.json carries no skill table), so the outfit's skeleton is the only
+  // source of its skill clips: 史尔特尔's 自由//失效 ships Skill_2 / Skill_3_Begin / _Idle / _Loop and must resolve them
+  // (a `skills` map the renderer's setSkillIndex reads) instead of falling back to `via: 'attack'` for every skill.
+  const charId = 'char_350_surtr';
+  const stem = 'char_350_surtr_it_1';
+  const skel = path.join(ROOT, 'public', 'assets', 'spine', 'op', charId, stem, 'front', `${stem}.skel`);
+  if (!fs.existsSync(skel)) return t.skip('the 自由//失效 model is not installed on this checkout');
+  const { entry } = await resolveSkinSpineFromDisk(charId, stem, 'front', { skillIndices: [0] });
+  assert.ok(entry && entry.anims, 'the outfit resolves to a drawable entry');
+  assert.deepEqual(entry.anims.skills?.['2'], { begin: 'Skill_3_Begin', loop: 'Skill_3_Loop', end: null, index: 2, idle: 'Skill_3_Idle' },
+    'S3 (index 2) is her own clip set');
+  assert.deepEqual(entry.anims.skills?.['1'], { begin: null, loop: 'Skill_2', end: null, index: 1, idle: null }, 'S2 likewise');
+
+  // and what the manifest's installed outfits carry today: a clip set per numbered skill its skeleton has. A manifest
+  // written before this fix has none (data/assets.json is generated: re-run `node tools/skins.mjs inject`), so this
+  // sweep reports the gap instead of failing the tree.
+  let missing = 0;
+  for (const [id, rec] of Object.entries(manifest.chars || {})) {
+    for (const [skinId, skin] of Object.entries(rec.skins || {})) {
+      const sp = skin && skin.spine && skin.spine.front;
+      if (!sp || !sp.anims) continue;
+      const names = Object.keys(sp.animations || {});
+      const n = names.filter((x) => /^Skill_\d+_Loop$/.test(x)).map((x) => Number(/^Skill_(\d+)_Loop$/.exec(x)[1])).sort((a, b) => a - b)[0];
+      if (!n) continue;
+      const clip = sp.anims.skills?.[String(n - 1)];
+      if (clip && clip.loop === `Skill_${n}_Loop`) continue;
+      missing++;
+      assert.ok(!clip || clip.loop === `Skill_${n}_Loop`, `${id} ${skinId}: a skill map names the wrong clip`);
+    }
+  }
+  t.diagnostic(`${missing} installed outfit(s) in data/assets.json have no numbered skill clips yet`);
+});
+
+test('spineEntry: an outfit’s summon model wins for the owner’s token, the token’s own model is the fallback', () => {
+  const BASE = { skel: '/assets/base/token.skel', atlas: '/assets/base/token.atlas', textures: ['/assets/base/token.png'], anims: { idle: 'Idle' } };
+  const WORN = { skel: '/assets/worn/token.skel', atlas: '/assets/worn/token.atlas', textures: ['/assets/worn/token.png'], anims: { idle: 'Idle' } };
+  const m = {
+    chars: { owner: { skins: { 'owner@aura#2': { name: 'x', tokens: { token_a: { tokenSkinId: 'token_a_aura#2', spine: WORN } } } } } },
+    tokens: {
+      token_a: { owner: 'owner', spine: BASE },
+      token_b: { owner: 'owner', spine: BASE },
+      token_orphan: { spine: BASE },
+    },
+  };
+  assert.equal(spineEntry(m, 'token_a', {}).skel, BASE.skel, 'no outfit: the token’s own model');
+  const worn = spineEntry(m, 'token_a', { skin: 'owner@aura#2' });
+  assert.equal(worn.skel, WORN.skel);
+  assert.equal(worn.fallback.skel, BASE.skel, 'a load failure falls back to the token’s own model');
+  assert.equal(spineEntry(m, 'token_a', { skin: 'owner@plain#1' }).skel, BASE.skel, 'an outfit with no map for this token');
+  assert.equal(spineEntry(m, 'token_b', { skin: 'owner@aura#2' }).skel, BASE.skel, 'a token the outfit does not re-model');
+  assert.equal(spineEntry(m, 'token_orphan', { skin: 'owner@aura#2' }).skel, BASE.skel, 'a token with no owner');
+
+  // after `node tools/skins.mjs inject`, the real manifest must resolve every mapped token through its outfit
+  let checked = 0;
+  for (const [charId, rec] of Object.entries(manifest.chars || {})) {
+    for (const [skinId, skin] of Object.entries(rec.skins || {})) {
+      for (const [tokenId, tk] of Object.entries(skin.tokens || {})) {
+        const sp = tk && tk.spine;
+        const listed = manifest.tokens?.[tokenId];
+        if (!sp || !listed) continue; // a token the manifest does not list has no model to swap
+        checked++;
+        assert.equal(spineEntry(manifest, tokenId, { skin: skinId }).skel, sp.skel, `${charId} ${skinId} → ${tokenId}`);
+        // the manifest names the token's owner, so tokenSkinSpine finds the outfit again (same lookup the renderer makes)
+        assert.equal(listed.owner, charId, `${tokenId} is the summon of ${charId}`);
+      }
+    }
+  }
+  assert.ok(Number.isInteger(checked));
+});

@@ -13,6 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { startServer, parseRange, acceptsGzip, pickEncoding, parseTrustProxy } from '../server/index.js';
+import { maxMatchPlayers, ownerToken } from '../server/http/config.js';
 import { loadData, lookup, getChess, getBond, getBand, getMode, getConfig, INDEXED_FILES } from '../server/data.js';
 import * as dataModule from '../server/data.js';
 import { CODE_ALPHABET, BOT_NAMES } from '../server/lobby.js';
@@ -20,7 +21,7 @@ import { sanitizeName, TokenBucket, SessionRegistry, clientAddress, normalizeIp,
 import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
+import { ERR, ERR_TEXT, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 // fileURLToPath 才会做百分号解码：`new URL().pathname` 在含非 ASCII 的仓库路径（例如 `G:\卫\…`）下会拼出假路径。
@@ -1900,6 +1901,194 @@ describe('per-network limits', () => {
     await delay(50);
     const ok = await netPlayer('s4', C);
     assert.ok(ok.isOpen, 'a slot freed up');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------
+// 对局人数上限 (SP_MAX_MATCH_PLAYERS) and the server owner's privilege (SP_OWNER_TOKEN)
+// ---------------------------------------------------------------------------------------------------
+
+describe('match player limit', () => {
+  const cap = captureLog();
+
+  /** Boot a server for one test; `extra` are startServer options (maxMatchPlayers / ownerToken …). */
+  async function boot(extra = {}) {
+    const srv = await startServer({ port: 0, host: '127.0.0.1', log: cap.log, MatchClass: Match, ...extra });
+    const url = `ws://127.0.0.1:${srv.port}/ws`;
+    const conns = [];
+    /**
+     * Connect + hello (`extra`: hello fields, e.g. `{ owner }`).
+     * @returns {Promise<{ c: any, welcome: any }>}
+     */
+    async function player(name, extra = {}) {
+      const c = await TestClient.connect(url);
+      conns.push(c);
+      const welcome = await c.hello(name, null, extra);
+      c.id = welcome.playerId;
+      c.token = welcome.token;
+      return { c, welcome };
+    }
+    /** A solo room started by one human (its match runs); returns the room.start reply. */
+    async function solo(name, helloExtra = {}) {
+      const { c } = await player(name, helloExtra);
+      const r = await c.request({ t: 'room.create', mode: 'solo', difficulty: 'FUNNY' });
+      assert.equal(r.t, 'ok', JSON.stringify(r));
+      const start = await c.request({ t: 'room.start' });
+      return { c, start };
+    }
+    const health = async () => JSON.parse((await httpReq(srv.port, '/healthz')).body.toString());
+    const done = async () => { for (const c of conns) await c.terminate().catch(() => {}); await srv.close(); };
+    return { srv, player, solo, health, done };
+  }
+
+  after(() => assert.deepEqual(cap.errors, [], 'no server errors logged'));
+
+  test('with the default cap of 20 in matches the 21st human is refused with SERVER_FULL; the hall stays open', async () => {
+    const t = await boot();
+    try {
+      for (let i = 0; i < 20; i++) {
+        const { start } = await t.solo(`L${i}`);
+        assert.equal(start.t, 'ok', `match ${i}: ${JSON.stringify(start)}`);
+      }
+      const before = await t.health();
+      assert.equal(before.matchPlayers, 20, 'the one count: humans inside running matches');
+      assert.equal(before.matchPlayerLimit, 20, 'the default cap, printed by /healthz');
+
+      const { c, welcome } = await t.player('Late');
+      assert.deepEqual(welcome.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20 }, 'welcome carries the numbers');
+      // the hall is never limited: creating a room, taking seats and adding AI all work
+      assert.equal((await c.request({ t: 'room.create', mode: 'coop', difficulty: 'FUNNY' })).t, 'ok');
+      await expectOk(c, { t: 'room.addBot' });
+      const state = await c.waitFor('room.state', (s) => s.seats.filter(Boolean).length === 2);
+      assert.deepEqual(state.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20 }, 'room.state carries the numbers');
+      // … but entering a match does not
+      const refused = await c.request({ t: 'room.start' });
+      assert.equal(refused.t, 'error');
+      assert.equal(refused.code, ERR.SERVER_FULL);
+      assert.equal(refused.msg, '服务器对局已满，请稍后再试');
+      const after = await t.health();
+      assert.equal(after.matchPlayers, 20, 'nothing started');
+      assert.equal(after.matches, 20);
+    } finally { await t.done(); }
+  });
+
+  test('AI seats take no room under the cap (and a room still in its lobby counts nothing)', async () => {
+    const t = await boot({ maxMatchPlayers: 2 });
+    try {
+      assert.equal((await t.solo('A')).start.t, 'ok'); // 1 in a match
+      const { c } = await t.player('B'); // a co-op room: 1 human + 3 AI
+      assert.equal((await c.request({ t: 'room.create', mode: 'coop', difficulty: 'FUNNY' })).t, 'ok');
+      for (let i = 0; i < 3; i++) await expectOk(c, { t: 'room.addBot' });
+      const mid = await t.health();
+      assert.equal(mid.matchPlayers, 1, 'the room in its lobby counts nothing yet: only A is in a match');
+      assert.equal((await c.request({ t: 'room.start' })).t, 'ok', 'one more human fits: the AI seats are no humans');
+      const full = await t.health();
+      assert.equal(full.matchPlayers, 2);
+      assert.equal(full.bots, 3, 'three AI seats in the running co-op match');
+      assert.equal((await t.solo('C')).start.code, ERR.SERVER_FULL, 'the third human is refused');
+    } finally { await t.done(); }
+  });
+
+  test('a cap of 0 (or an empty SP_MAX_MATCH_PLAYERS) means no limit', async () => {
+    const t = await boot({ maxMatchPlayers: 0 });
+    try {
+      for (let i = 0; i < 4; i++) assert.equal((await t.solo(`U${i}`)).start.t, 'ok', `unlimited match ${i}`);
+      const h = await t.health();
+      assert.equal(h.matchPlayers, 4);
+      assert.equal(h.matchPlayerLimit, 0, '/healthz says the server is unlimited');
+    } finally { await t.done(); }
+  });
+
+  test('SP_MAX_MATCH_PLAYERS: default 20, empty/0 = unlimited, a typo keeps the default; SP_OWNER_TOKEN: empty = off', async () => {
+    const env = { ...process.env };
+    try {
+      delete process.env.SP_MAX_MATCH_PLAYERS;
+      assert.equal(maxMatchPlayers(), 20, 'unset → 20');
+      process.env.SP_MAX_MATCH_PLAYERS = '';
+      assert.equal(maxMatchPlayers(), 0, 'empty → unlimited');
+      process.env.SP_MAX_MATCH_PLAYERS = '0';
+      assert.equal(maxMatchPlayers(), 0, '0 → unlimited');
+      process.env.SP_MAX_MATCH_PLAYERS = ' 8 ';
+      assert.equal(maxMatchPlayers(), 8);
+      process.env.SP_MAX_MATCH_PLAYERS = 'nope';
+      assert.equal(maxMatchPlayers(), 20, 'a typo never removes the cap silently');
+      delete process.env.SP_OWNER_TOKEN;
+      assert.equal(ownerToken(), null, 'unset: nobody has the privilege');
+      process.env.SP_OWNER_TOKEN = '  ';
+      assert.equal(ownerToken(), null, 'empty: off');
+      process.env.SP_OWNER_TOKEN = 'S3CRET';
+      assert.equal(ownerToken(), 'S3CRET');
+    } finally {
+      for (const k of ['SP_MAX_MATCH_PLAYERS', 'SP_OWNER_TOKEN']) {
+        if (env[k] == null) delete process.env[k];
+        else process.env[k] = env[k];
+      }
+    }
+  });
+
+  test('the server owner is never counted and never refused; a wrong key grants nothing', async () => {
+    const t = await boot({ maxMatchPlayers: 1, ownerToken: 'OWNER-KEY' });
+    try {
+      assert.equal((await t.solo('A')).start.t, 'ok'); // the cap is full: 1 human in a match
+      assert.equal((await t.solo('B')).start.code, ERR.SERVER_FULL, 'a plain player is refused');
+      assert.equal((await t.solo('C', { owner: 'wrong-key' })).start.code, ERR.SERVER_FULL, 'a wrong key is only a plain player');
+      const owner = await t.solo('Owner', { owner: 'OWNER-KEY' });
+      assert.equal(owner.start.t, 'ok', 'the owner always starts');
+      const h = await t.health();
+      assert.equal(h.matchPlayers, 1, 'the owner takes no room under the cap');
+      assert.equal(h.matchOwners, 1, 'and is counted apart (12+1/20 in the client)');
+      // the owner's own room always starts, a teammate included (the privilege is the room's)
+      const { c: host } = await t.player('Owner2', { owner: 'OWNER-KEY' });
+      const created = await host.request({ t: 'room.create', mode: 'coop', difficulty: 'FUNNY' });
+      assert.equal(created.t, 'ok', JSON.stringify(created));
+      const state = await host.waitFor('room.state', (s) => s.hostId === host.id);
+      const { c: mate } = await t.player('Mate');
+      assert.equal((await mate.request({ t: 'room.join', code: state.code })).t, 'ok');
+      assert.equal((await mate.request({ t: 'room.ready', ready: true })).t, 'ok');
+      const ownerStart = await host.request({ t: 'room.start' });
+      assert.equal(ownerStart.t, 'ok', `an owner's room starts over the cap: ${JSON.stringify(ownerStart)}`);
+      const h2 = await t.health();
+      assert.equal(h2.matchPlayers, 2, 'the owner\'s teammate does count (the cap is only waived for the owner)');
+      assert.equal(h2.matchOwners, 2, 'two owner sessions in matches, both counted apart');
+    } finally { await t.done(); }
+  });
+
+  test('without SP_OWNER_TOKEN nobody is an owner: the key in the hello changes nothing', async () => {
+    const t = await boot({ maxMatchPlayers: 1 }); // no ownerToken
+    try {
+      assert.equal((await t.solo('A')).start.t, 'ok');
+      assert.equal((await t.solo('Boss', { owner: 'OWNER-KEY' })).start.code, ERR.SERVER_FULL);
+      const h = await t.health();
+      assert.equal(h.matchOwners, 0);
+    } finally { await t.done(); }
+  });
+
+  test('the client text: ERR_TEXT, the four packs and ui/serverLoad.js agree', async () => {
+    assert.equal(ERR_TEXT.SERVER_FULL, '服务器对局已满，请稍后再试');
+    const packs = {};
+    for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
+      const p = path.join(ROOT, 'public/i18n', `${code}.json`);
+      packs[code] = JSON.parse(fs.readFileSync(p, 'utf8'));
+      for (const key of [ERR_TEXT.SERVER_FULL, '对局 {players}/{max} 人', '对局 {players} 人', '同时在对局中的博士人数（服主不计入）']) {
+        assert.ok(typeof packs[code][key] === 'string' && packs[code][key], `${code}.json lacks ${key}`);
+      }
+      assert.ok(!/[一-鿿]/.test(packs.en[ERR_TEXT.SERVER_FULL]), `en.json translates the error text: ${packs.en[ERR_TEXT.SERVER_FULL]}`);
+    }
+    const { serverLoad, serverLoadText } = await import('../public/js/ui/serverLoad.js');
+    const i18n = await import('../shared/i18n.js');
+    assert.deepEqual(serverLoad({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20 }), { players: 12, owners: 1, limit: 20, full: false });
+    assert.equal(serverLoad({ foo: 1 }), null, 'no numbers: nothing to show');
+    i18n.setLang('zh');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 }), '对局 12/20 人');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20 }), '对局 12+1/20 人', 'the owner shown apart');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 0 }), '对局 12 人', 'no limit: no denominator');
+    assert.equal(serverLoadText(null), '');
+    i18n.addMessages('en', packs.en);
+    i18n.setLang('en');
+    try {
+      assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 }), 'Matches 12/20');
+      assert.equal(i18n.t(ERR_TEXT.SERVER_FULL), 'The server has no free match slot right now — please try again later');
+    } finally { i18n.setLang('zh'); i18n.setMessages('en', {}); }
   });
 });
 

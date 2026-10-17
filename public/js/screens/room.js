@@ -26,6 +26,7 @@ import { copyText } from '../ui/clipboard.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { SettingsButton } from '../ui/settings.js';
+import { ServerLoad } from '../ui/serverLoad.js';
 import { LoadoutButton } from './loadout.js';
 import { PluginTag, isModdedRoom } from '../ui/pluginTag.js';
 import { hasScriptConsent, rememberScriptConsent } from '../content.js';
@@ -242,6 +243,8 @@ export function RoomScreen() {
   const room = useStore((s) => s.room);
   const me = useStore((s) => s.me, shallowEqual);
   const conn = useStore((s) => s.connection, shallowEqual);
+  // 对局人数 (server/lobby.js matchStats): the room.state's stats — 「对局 12/20 人」, and why a start may be refused
+  const serverStats = useStore((s) => s.stats, shallowEqual);
   const [busy, setBusy] = useState(null);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
@@ -328,6 +331,7 @@ export function RoomScreen() {
           <${PingPill} ms=${conn.ping} online=${online} />
           <${MicroLabel}>${t('当前延迟')}<//>
         </div>
+        <${ServerLoad} stats=${serverStats} />
         <${Button} variant="secondary" size="sm" icon="chart" class="stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>${t('统计')}<//>
         <${SettingsButton} class="room-settings" variant="secondary" label=${t('设置')} />
         <${GuideButton} class="room-guide" variant="secondary" label=${t('玩法说明')} />

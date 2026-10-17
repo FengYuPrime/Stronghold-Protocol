@@ -3,8 +3,9 @@
 // and Skill_2_Idle; the actor queued the loop after the begin clip, so it jumped with nobody to hit (the sim made no
 // attack). Now a skill with an idle clip of its own (anims skill.idle ≠ skill.loop) stands in that idle between attacks,
 // plays the loop only on attacks, and goes back to the idle after a spell of attacks (its End clip only when the skill
-// ends). Skills whose loop IS their idle (蕾缪安 S3) and skills without an idle (宴 S1) are unchanged. Real manifest entries,
-// headless fake PIXI (test/render/fakepixi.js).
+// ends). Skills whose loop IS their idle (蕾缪安 S3) are unchanged; a skill without an idle whose loop carries no strike
+// frame in the manifest's `hits` holds that loop as its stance (宴 S1 — spine.js `_skillLoopIsStance`). Real manifest
+// entries, headless fake PIXI (test/render/fakepixi.js).
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -92,5 +93,9 @@ test('unchanged: a loop that is the skill idle (蕾缪安 S3) and a skill withou
   u.log.length = 0;
   u.attack(1.2);
   run(u, 1.2 * 1.4 + 0.1);
-  assert.deepEqual(names(u).slice(-2), ['Skill_End', 'Idle'], 'its spell of attacks still ends as before');
+  // Skill_Loop carries no strike frame in her `hits` ({"Attack": [0.433]}): it is the stance the client holds for the
+  // skill (spine.js `_skillLoopIsStance`), so a spell of attacks ends back on it — the End clip is for the skill's end
+  // (setSkill(false), see spine-skill-stance.test.js) instead of being re-played after every attack
+  assert.equal(u.current, 'Skill_Loop', 'back on the stance');
+  assert.ok(!names(u).includes('Skill_End'), 'no End clip between attacks');
 });

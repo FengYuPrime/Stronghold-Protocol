@@ -35,6 +35,7 @@ import { overtimeState, overtimeDrainPerSec, remainAt } from './matchStatus.js';
 import { hotkeyLabelOf } from './settings.js';
 import { t, tParts, N_ } from '../../../shared/i18n.js';
 import { UnofficialMark } from './pluginTag.js';
+import { ServerLoad } from './serverLoad.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -418,6 +419,7 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
     </div>
 
     <div class="gtop__right">
+      <${ServerLoad} stats=${room?.stats} class="gtop__load" />
       <div class="gtop__clock">
         ${frozenSecs != null
           ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`

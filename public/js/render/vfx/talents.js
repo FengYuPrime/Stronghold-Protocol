@@ -23,6 +23,14 @@
 // `ability`, else the class its field belongs to (`from` 'RebornTalent._buffs'), else the first; a mode's copy marked
 // `same` plays the uses of the node it copies. The planner's `mode` filter is off: a node's uses name the mode holding it.
 //
+// A talent the data gives no use at all (`uses: []` while its key sits in `unclassified`: the extractor exports the
+// effect but not what places it — 黍's 天赋 1, `shu_talent_buff_01`) falls back to the effect's own prefab: the keys that
+// name a talent and whose prefab is a loop placed on its holder (its spawn location is not a tile or the camera: its
+// `prefabs[key].spawn`, e.g. GROUND_CENTER) become a `loop` on the owner, attached to the node `passive` (or the first)
+// [ASSUMED: the client's talent aura follows its owner]. Nothing else changes: a talent with uses keeps exactly them,
+// and an unclassified key a talent does not name (a ground / trap / bullet / mark effect of another node) stays
+// unbound — its placement is not the owner's.
+//
 // When a binding plays (talentfx.js): `deploy` — its one-shots at the unit's 'deploy' (an enemy's or a summon's 'spawn'),
 // its loops while the unit stands; `passive` — its loops from the deploy until the unit leaves the field, a node in a
 // mode (a general ability's `modes`) only while that mode is on; `toggle` — while its checkers hold (toggleOn); `reborn`
@@ -31,7 +39,7 @@
 // (triggerKinds: a fatal blow → 'substitute' / 'undying', a stand-in buff's end → 'swap' / 'dollEnd', a skill start, the
 // owner's birth); `attack` — the attack it adds or replaces only where a kit fx marks it ('extraAttack'), else nothing.
 
-import { planUses, emptyPlan, planKeys } from './skills.js';
+import { planUses, emptyPlan, planKeys, SPAWN_LOCATIONS } from './skills.js';
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const lc = (k) => (typeof k === 'string' && k ? k.toLowerCase() : null);
@@ -78,6 +86,33 @@ export function activeTalentKeys(idx, unitKey, { rec = null } = {}) {
 /** The equipped skill index of a unit view's info (a 自选 pick's, else its own). */
 const skillIndexOf = (info) => (Number.isInteger(info?.diy?.skillIndex) ? info.diy.skillIndex : Number.isInteger(info?.skillIndex) ? info.skillIndex : null);
 
+/** An effect key that names a talent's own visual (`shu_talent_buff_01`, `…_telent_01`, the client's own spelling mix). */
+const TALENT_KEY = /(?:^|_)(?:talent|telent)(?:_|$)/i;
+/** Spawn locations that are not on their holder: such an effect needs a position the client is not given. */
+const OFF_OWNER = new Set(['CAMERA', 'TILE_CENTER']);
+
+/**
+ * The uses of a talent the data gives none for (module header): its `unclassified` keys that name a talent and whose
+ * prefab is a loop on its holder (a spawn location that is neither a tile nor the camera) — a `loop` on the owner. Empty
+ * for a talent that has uses (its own placement wins) or whose unclassified keys are other nodes' effects (a ground, a
+ * trap, a bullet, a mark: the owner is not where they go).
+ * @returns {any[]}
+ */
+export function ownerFallbackUses(idx, t) {
+  if (!isObj(t) || (Array.isArray(t.uses) ? t.uses.length : 0)) return [];
+  const prefabs = isObj(idx?.prefabs) ? idx.prefabs : {};
+  const out = [];
+  for (const k of Array.isArray(t.unclassified) ? t.unclassified : []) {
+    const key = lc(k);
+    const p = key ? prefabs[key] : null;
+    if (!isObj(p) || p.looping !== true || !TALENT_KEY.test(key)) continue;
+    const point = Number.isInteger(p.spawn) ? SPAWN_LOCATIONS[p.spawn] ?? null : null;
+    if (!point || OFF_OWNER.has(point)) continue;
+    out.push({ role: 'loop', keys: [key], from: 'talent.unclassified', on: 'owner' });
+  }
+  return out;
+}
+
 /**
  * Every talent node and ability of a unit as a binding (module header): talents in force only (activeTalentKeys), and
  * only the nodes valid with the equipped skill (`skills`).
@@ -91,10 +126,15 @@ export function talentBindings(idx, unitKey, { info = null, rec = null } = {}) {
   const sk = skillIndexOf(info);
   for (const [key, t] of Object.entries(isObj(unit.talents) ? unit.talents : {})) {
     if (active && !active.has(key)) continue;
-    (Array.isArray(t.nodes) ? t.nodes : []).forEach((n, i) => {
+    const nodes = Array.isArray(t?.nodes) ? t.nodes : [];
+    // a talent the data places nowhere (module header): its own effect loops on the holder, on the `passive` node
+    const own = ownerFallbackUses(idx, t);
+    const fallbackOn = own.length ? Math.max(0, nodes.findIndex((n) => isObj(n) && n.when === 'passive')) : -1;
+    nodes.forEach((n, i) => {
       if (!isObj(n)) return;
       if (Array.isArray(n.skills) && n.skills.length && !(sk != null && n.skills.includes(sk))) return;
-      const uses = nodeUses(t, i);
+      let uses = nodeUses(t, i);
+      if (!uses.length && i === fallbackOn) uses = own.map((u) => ({ ...u, node: n.node ?? null }));
       const plan = planUses(idx, emptyPlan(unitKey, key), uses, { mode: null, abilities: t.abilities });
       out.push({
         id: `t:${key}#${i}`, source: 'talent', key, kind: null, node: n.node ?? null, class: n.class ?? null, ability: n.ability ?? null,

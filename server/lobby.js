@@ -46,6 +46,18 @@
 //     created from one network may exist at once and at most `maxMatchesPerAddr` matches started from one
 //     network may run at once (room.create / room.start → ERR.RATE). Without them a socket loop could fill
 //     `maxRooms` or keep hundreds of unattended matches simulating for the whole reconnect window.
+//   * 对局人数上限 (the owner's decision for low-spec servers; env SP_MAX_MATCH_PLAYERS, server/http/config.js):
+//     at most `maxMatchPlayers` humans (default 20, 0 = no limit) may be *inside a running match* at once. The one
+//     count is matchLoad(): every room whose match runs contributes its human player seats — bots and spectator seats
+//     are no humans, a room still in its lobby counts nothing, a departed seat (left) nothing either, and a
+//     disconnected human still counts (the match keeps running for them). room.start that would exceed the cap is
+//     refused with ERR.SERVER_FULL (nothing starts; the client shows 「服务器对局已满，请稍后再试」). The hall is never
+//     limited: waiting, browsing and spectating do not count and are never refused. The count and the cap travel with
+//     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit }
+//     (matchStats), and `/healthz` (stats()) — no polling.
+//   * 服主特权 (SP_OWNER_TOKEN, net.js ownerToken): a session whose hello carried the server's owner key is the owner
+//     (session.owner). Its seats are never counted against the cap and are never refused by it: a room that holds an
+//     owner starts regardless. The key never reaches a log, a frame or /healthz; a wrong one grants nothing.
 //   * Permanent departure during a match (room.leave, g.leave, reconnect window expired): the seat is
 //     marked departed (shown as connected=false), match.onLeave(playerId) is called, and the seat is freed
 //     when the match ends. 'g.leave' is handled here and never reaches match.handle().
@@ -177,6 +189,10 @@ export const LOBBY_DEFAULTS = Object.freeze({
   maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
+  // 对局人数上限 (env SP_MAX_MATCH_PLAYERS, server/http/config.js): how many humans may be inside a running match at
+  // once — the seats of rooms whose match runs (bots and spectator seats are none, a room still in its lobby is none).
+  // A start that would exceed it is refused with ERR.SERVER_FULL. 0 = no limit.
+  maxMatchPlayers: 20,
 });
 
 /** Official `singleReconnectTime` (s) when the data lacks it (constData, research 01 §1). */
@@ -192,6 +208,20 @@ const matchAnswer = (res) => (res && typeof res === 'object' && res.error
   ? fail(isErrCode(res.error) ? res.error : ERR.INTERNAL, typeof res.detail === 'string' ? res.detail : undefined)
   : OK);
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
+
+/**
+ * A cap on humans in running matches: a whole number ≥ 0 (0 = no limit), and an empty value means 0 like the server's
+ * SP_MAX_MATCH_PLAYERS (server/http/config.js maxMatchPlayers); anything else keeps the default, so a mistyped
+ * setting never removes the cap by accident.
+ * @param {unknown} v
+ * @returns {number}
+ */
+function matchPlayerCap(v) {
+  if (v === null || v === undefined) return LOBBY_DEFAULTS.maxMatchPlayers;
+  if (v === '') return 0;
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 0 ? n : LOBBY_DEFAULTS.maxMatchPlayers;
+}
 
 /**
  * @typedef {{ seat: number, playerId: string, name: string, isBot: boolean, ready: boolean,
@@ -328,8 +358,12 @@ export class Room {
   /** Humans that have not departed, in seat order. @returns {Seat[]} */
   activeHumans() { return this.seats.filter((s) => s && !s.isBot && !s.left); }
 
-  /** `room.state` frame (DESIGN §8.1) plus `inMatch`. */
-  toState() {
+  /**
+   * `room.state` frame (DESIGN §8.1) plus `inMatch`, and — when the lobby passes them — `stats`, the server's match
+   * occupancy ({ matchPlayers, matchOwners, matchPlayerLimit }; Lobby.matchStats): the client shows 「对局 12/20 人」.
+   * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number } | null} [stats]
+   */
+  toState(stats = null) {
     return {
       t: 'room.state',
       code: this.code,
@@ -338,6 +372,7 @@ export class Room {
       difficulty: this.difficulty,
       aiPicksLast: this.aiPicksLast,
       inMatch: !!this.match,
+      ...(stats ? { stats } : {}),
       seats: this.seats.map((s) => (s
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left,
           // a room with gameplay plugins (header "Gameplay plugins"): has this player's page loaded and checked its content?
@@ -387,6 +422,10 @@ export class Lobby {
     this.now = now;
     this.seedFn = seedFn || (() => randomInt(2 ** 32));
     this.opts = { ...LOBBY_DEFAULTS, ...options };
+    // 对局人数上限 (LOBBY_DEFAULTS.maxMatchPlayers): a whole number ≥ 0, 0 = no limit; anything else (a stray string from
+    // an env read, a typo) keeps the default, so a bad value never removes the cap silently
+    this.opts.maxMatchPlayers = matchPlayerCap(this.opts.maxMatchPlayers);
+    this.log.info(`[lobby] at most ${this.opts.maxMatchPlayers > 0 ? this.opts.maxMatchPlayers : 'unlimited'} doctor(s) in a match at once (SP_MAX_MATCH_PLAYERS)`);
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
     /** @type {Map<string, NodeJS.Timeout>} lobby grace timers by playerId */
@@ -471,7 +510,7 @@ export class Lobby {
   /** @param {string} code @returns {Room | null} */
   getRoom(code) { return this.rooms.get(String(code).toUpperCase()) || null; }
 
-  /** Counters for /healthz. */
+  /** Counters for /healthz (plus the match-player limit and how much of it is in use). */
   stats() {
     let matches = 0;
     let humans = 0;
@@ -482,7 +521,45 @@ export class Lobby {
       for (const s of r.seats) if (s && !s.left) (s.isBot ? bots++ : humans++);
       spectators += r.spectators.length;
     }
-    return { rooms: this.rooms.size, matches, humans, bots, spectators };
+    const load = this.matchLoad();
+    return { rooms: this.rooms.size, matches, humans, bots, spectators,
+      matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers };
+  }
+
+  /**
+   * The one count of 「在对局中的真人玩家」 (the match-player limit and its display, header "对局人数上限" is
+   * LOBBY_DEFAULTS.maxMatchPlayers): for every room whose match is running, its human player seats only —
+   *   * a seat of a room still in its lobby counts nothing (nobody there is in a match yet);
+   *   * bots are no humans, spectator seats are no players, and a human who departed (seat.left) no longer counts;
+   *   * a disconnected human keeps counting: the match keeps running for them (a solo run is resumable for 24 h).
+   * The server owner's seats (the `SP_OWNER_TOKEN` sessions, net.js Session.owner) are counted apart (`owners`): they
+   * take no room under the limit and are never refused by it.
+   * @returns {{ players: number, owners: number }} players: humans under the limit; owners: the owner's own seats
+   */
+  matchLoad() {
+    let players = 0;
+    let owners = 0;
+    for (const r of this.rooms.values()) {
+      if (!r.match) continue;
+      for (const s of r.activeHumans()) {
+        if (this.isOwner(s)) owners++;
+        else players++;
+      }
+    }
+    return { players, owners };
+  }
+
+  /** Is this human seat the server owner's (its session presented SP_OWNER_TOKEN)? Bots and seatless ids: false. */
+  isOwner(seat) {
+    if (!seat || seat.isBot) return false;
+    const session = this.registry.byId(seat.playerId);
+    return session?.owner === true;
+  }
+
+  /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are (matchLoad). */
+  matchStats() {
+    const load = this.matchLoad();
+    return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -1089,6 +1166,18 @@ export class Lobby {
       this.limitWarn(`match limit (${this.opts.maxMatchesPerAddr}) reached for ${session.addr}`);
       return fail(ERR.RATE, 'too many running matches from your network');
     }
+    // 对局人数上限: how many humans are in the server's running matches right now (matchLoad) must leave room for this
+    // room's humans. The hall is never limited — only entering a match is. The server owner's seats (SP_OWNER_TOKEN)
+    // are never counted and never refused: a room with an owner starts regardless of the cap.
+    const cap = this.opts.maxMatchPlayers;
+    if (cap > 0 && !humans.some((s) => this.isOwner(s))) {
+      const load = this.matchLoad();
+      const entering = humans.filter((s) => !this.isOwner(s)).length;
+      if (load.players + entering > cap) {
+        this.limitWarn(`match player limit (${cap}) reached: ${load.players} in matches + ${entering} entering`);
+        return fail(ERR.SERVER_FULL, `match player limit (${cap}) reached`);
+      }
+    }
     return this.startMatch(room, key);
   }
 
@@ -1283,14 +1372,16 @@ export class Lobby {
   }
 
   /**
-   * Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`) and the
-   * server's content identity (header "Content identity").
+   * Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`), the
+   * server's content identity (header "Content identity") and how full its matches are (`stats`: the hall shows
+   * 「对局 12/20 人」 before a room's `room.state` arrives).
    */
   welcomeInfo() {
-    if (!this.vanilla) return { diyKitted: KITTED_CHARS };
+    const stats = this.matchStats();
+    if (!this.vanilla) return { diyKitted: KITTED_CHARS, stats };
     let n;
     try { n = Number(this.plugins?.unofficial?.()) || 0; } catch { n = 0; }
-    return { diyKitted: KITTED_CHARS, content: n > 0 ? { vanilla: this.vanilla.cs, plugins: n } : { vanilla: this.vanilla.cs } };
+    return { diyKitted: KITTED_CHARS, stats, content: n > 0 ? { vanilla: this.vanilla.cs, plugins: n } : { vanilla: this.vanilla.cs } };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -1781,7 +1872,7 @@ export class Lobby {
   broadcastState(room) {
     if (room.disposed) return;
     if (this.trustedRuntime) {
-      const state = room.toState(), prev = room.trustedPrevious;
+      const state = room.toState(this.matchStats()), prev = room.trustedPrevious;
       const event = (name,extra={}) => this.trustedRuntime.event(name,{room:state,...extra});
       if (!prev) event('roomCreated');
       const before = new Set((prev?.seats || []).filter(Boolean).map(s => s.playerId));
@@ -1791,12 +1882,12 @@ export class Lobby {
       if (state.inMatch && !prev?.inMatch) event('matchStarted');
       room.trustedPrevious = state;
     }
-    const data = encode(room.toState());
+    const data = encode(room.toState(this.matchStats()));
     for (const session of this.memberSessions(room)) sendRaw(session.ws, data);
   }
 
   sendState(room, session) {
-    sendSession(session, room.toState());
+    sendSession(session, room.toState(this.matchStats()));
   }
 
   /** Match broadcast: encode once, send to every connected member. @returns {string | null} the encoded frame */

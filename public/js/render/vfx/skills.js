@@ -1235,9 +1235,17 @@ export function chargeKeys(plan) {
  *   at          'point': the fx's (x, y) on the ground (the unit `extra.id` names stands there: its feet); 'target': once
  *               on the unit `extra.target` names (else at the fx's point), turned by the owner's side (FLIP_TWO_SIDE);
  *               else on the view `extra.id` names (the fx's point without one)
- *   hold        how long a looping reached effect stays: a blackboard key of our skill record (seconds), 'fx' — the
- *               fx's own `duration` / `dur` / `hold` (the kit's area or lock time) —, else `holdS`
+ *   tiles       with `at` 'point': the tile offsets ([dx, dy] in board tiles) of the fx's point to play the keys at, one
+ *               copy each — a kit whose fx names one tile while the official effect covers several (黍's 十字 sowing)
+ *   hold        how long a looping reached effect stays: 'owner' — as long as its owner stands (the whole deployment: a
+ *               decal that marks a lasting state, 黍's sowing; the cost is a permanent effect) —, a blackboard key of our
+ *               skill record (seconds), 'fx' — the fx's own `duration` / `dur` / `hold` (the kit's area or lock time) —,
+ *               else `holdS`
  *   cover       fx kinds of the same owner at that tile that the reached effect draws (skipped while it plays)
+ *   decal       a ground decal (`at` 'point'): exempt from the effects budget (render/vfx/system.js MAX_EFFECTS) — the
+ *               battle may lay any number of them (its particles still count against MAX_PARTICLES)
+ *   skin        play the prefab the owner's outfit plays in place of the keys (wiring.skinKey: a row of the unit's own
+ *               animation, so a worn outfit's hook replaces it; a replacement the extraction does not hold keeps the key)
  *   during      only while the skill lasts (SkillFx._lasts: on, its activation frame, COVER_AFTER_S after its end, or a
  *               binding of its owner still held — a lasting area's strikes); another fx of that kind is the kit's own
  * or, instead of a projectile (history §32.14.43):
@@ -1248,6 +1256,11 @@ export function chargeKeys(plan) {
  * AuraHitBehaviour — for the area's life), the strikes their hit effects.
  */
 const binding = (o) => Object.freeze({ ...o, ...(o.cover ? { cover: Object.freeze(o.cover) } : {}), ...(o.keys ? { keys: Object.freeze(o.keys) } : {}) });
+/**
+ * The tile offsets ([dx, dy]) 黍's T1 百谷长青 sows per heal: the healed unit's tile and the four next to it — the kit's
+ * SOW (server/sim/content/kits/ops/op-shu.js, [dr, dc] there), symmetric, so the two orders agree.
+ */
+const SOW_TILES = Object.freeze([[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]);
 export const FX_BINDINGS = Object.freeze({
   // 克莱门莎 S3 (op-clemnt.js bombard): the kit marks an enemy's tile ('lock': id = the enemy, src = her) and strikes it
   // three times ('blast', id = her, 0.5 / 1.5 / 2.5 s later). The client fires projectile_chr_clemnt_s3 at the marked
@@ -1303,6 +1316,24 @@ export const FX_BINDINGS = Object.freeze({
   // Damage ability (MultiMeleeAttack: blkkgt_skill_03_start_01 / _02 on her); the finale is its EndAttack (`when: 'end'`)
   skchr_blkkgt_3: Object.freeze({
     slash: binding({ owner: 'id', attack: 'Damage' }),
+  }),
+  // 琳琅诗怀雅 S2 (chess_char_3_04-swire2.js installS2: a 'summon' at the champagne bomb she places, src = her): her
+  // attack is a composite (AbilitySelectableGroup, select trigger) whose first sub-ability is a SpawnTokenOnTileByIDAbility
+  // — a throw is no attack, so no 'atk' event ever plays its cast row swire2_skill_02_start (ON_CAST_START): the kit's
+  // summon plays it at the bomb's tile, once, turned by her side. It is a row of her own animation, so her outfit's hook
+  // replaces the key (`skin`: char_1033_swire2@ambiencesynesthesia#4's swire2_skill_02_start)
+  skchr_swire2_2: Object.freeze({
+    summon: binding({ owner: 'src', keys: ['swire2_skill_02_start'], at: 'target', skin: true }),
+  }),
+  // 黍 S3 (op-shu.js sow: a 'healField' where the healed unit stands, id = her — the fx names one tile while T1 sows
+  // five). The client's S3 draws the one-tile ground decal shu_talent_buff_02 there (index.json prefabs: spawn 5, a
+  // 2 s looping clip), so the binding plays it on every sown tile (`tiles`: SOW_TILES). A sow lasts until she leaves the
+  // field (op-shu.js: the sown set is cleared on death / retreat, never by time), so the decal does too (`hold:
+  // 'owner'`) and every tile keeps its own — the kit sends one fx per newly sown cross, so they accumulate (`decal`:
+  // outside the effects budget). It is a prefab of her own effects, not of her animation, but the outfits replace it all
+  // the same (换装: char_2025_shu@nian#11's shu_talent_buff_02_nian#11), so `skin` lets a worn outfit play its variant
+  skchr_shu_3: Object.freeze({
+    healField: binding({ owner: 'id', keys: ['shu_talent_buff_02'], at: 'point', tiles: SOW_TILES, hold: 'owner', decal: true, skin: true }),
   }),
 });
 

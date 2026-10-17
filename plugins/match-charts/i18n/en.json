@@ -7,12 +7,13 @@
   "平均 HPS": "Avg HPS",
   "总伤": "Damage",
   "每回合战斗统计": "Per-round battle statistics",
-  "这一局没有战斗统计（当时未开启统计悬浮窗）": "No battle statistics for this match (the stats overlay was off)",
+  "没有这场战斗的数据": "No data for this battle",
   "统计口径": "Metric",
-  "查看每回合各干员的输出曲线": "See each operator’s per-round output",
-  "每回合伤害量": "damage per round",
-  "每回合治疗量": "healing per round",
+  "选择回合": "Round",
+  "查看每回合各单位的伤害占比": "See each unit’s damage share per round",
+  "第 {n} 回合": "Round {n}",
+  "占比": "Share",
+  "该回合各单位的{v}占比；鼠标移到扇区可看数值": "Each unit’s {v} share this round; hover a slice for the numbers",
   "最后一回合": "final round",
-  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "Chart library missing: run npm install && npm run vendor in the repo root, then restart",
-  "这一局还没有存档，图上是最近一局（{time}）": "This match has no archive yet — showing the most recent one ({time})"
+  "图表库未安装：在仓库根目录运行 npm install && npm run vendor，然后重启": "Chart library missing: run npm install && npm run vendor in the repo root, then restart"
 }

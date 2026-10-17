@@ -192,6 +192,9 @@ export const ERR = Object.freeze({
   PLUGIN_INCOMPATIBLE: 'PLUGIN_INCOMPATIBLE',
   PLUGIN_BUSY: 'PLUGIN_BUSY',
   CONTENT_NOT_READY: 'CONTENT_NOT_READY',
+  // 对局人数上限 (server/lobby.js Lobby.start, env SP_MAX_MATCH_PLAYERS): as many humans are already in running matches,
+  // so this room cannot start one (the hall itself is never limited — only entering a match is)
+  SERVER_FULL: 'SERVER_FULL',
   INTERNAL: 'INTERNAL',
 });
 
@@ -214,6 +217,7 @@ export const ERR_TEXT = {
   PLUGIN_SCRIPT_OVERRIDE: N_('插件未声明要替换的官方技能'),
   PLUGIN_SCRIPT_CHECK: N_('脚本未通过兼容性检查'),
   CONTENT_NOT_READY: N_('仍有博士未载入房间的插件内容'),
+  SERVER_FULL: N_('服务器对局已满，请稍后再试'),
 };
 
 // ---- Emotes (交流, research 09 §4) -----------------------------------------------------------------------------

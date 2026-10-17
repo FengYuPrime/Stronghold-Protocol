@@ -559,6 +559,8 @@ export class SpineActor {
   _idleName() {
     const sk = this.roles.skill;
     if (this.skillOn && sk && this.has(sk.idle)) return sk.idle;
+    // a stance loop (no strike frame in `hits`) is the skill's resting pose: keep the cast's stance between attacks
+    if (this._skillLoopIsStance()) return this.roles.skill.loop;
     return this.has(this.roles.idle) ? this.roles.idle : (this.has('Idle') ? 'Idle' : [...this.names][0]);
   }
 
@@ -714,6 +716,27 @@ export class SpineActor {
   _skillIsBuffOnly() {
     const sk = this.roles.skill;
     return !!sk && sk.loop === this.roles.idle;
+  }
+
+  /**
+   * A skill loop with no strike frame in the manifest's `hits` is a *stance* — the pose the client holds for the whole
+   * skill — not a swing: `data/assets.json` gives 烛煌 S3 the anims { begin: Skill_3_Begin, loop: Skill_3_Loop,
+   * end: Skill_3_End, idle: null } while `hits` carries frames for Attack / Skill_1 / Skill_2_Loop only, so
+   * Skill_3_Loop is her casting stance (42 operators / enemies, 63 unit-skill loops in the manifest). The resting clip
+   * of such a skill is the loop itself: between its attacks the unit stays in the cast's pose instead of falling back
+   * to `Idle`, and the loop's End clip belongs to the end of the skill (setSkill(false)).
+   *
+   * A stance is authored Begin → Loop → End. The class without a Begin clip is the one-shot *cast* animation setSkill
+   * (true) documents below (德克萨斯 剑雨: `anims.skill { begin: null, loop: 'Skill' }`, a swing played once, not a
+   * pose): it keeps resting on the idle.
+   */
+  _skillLoopIsStance() {
+    const sk = this.roles.skill;
+    if (!this.skillOn || !sk || !this.has(sk.begin) || !this.has(sk.loop)) return false;
+    if (sk.loop === this.roles.idle || sk.loop === this.roles.attack?.loop) return false;
+    if (sk.via === 'attack' || this._skillIsBuffOnly()) return false;
+    const h = this.entry?.hits?.[sk.loop];
+    return !(Array.isArray(h) && h.length && Number.isFinite(h[0]));
   }
 
   /**
@@ -883,8 +906,9 @@ export class SpineActor {
           this.mode = 'base';
           this.wound = false;
           const clip = this._attackClip() || this.roles.attack;
-          // a skill with its own idle: back to that idle (its end clip is for the end of the skill, setSkill(false))
-          const toSkillIdle = clip === this.roles.skill && !!this._skillIdle();
+          // a skill with its own idle (or a stance loop: its `End` clip is for the end of the skill, setSkill(false)):
+          // back to that idle
+          const toSkillIdle = clip === this.roles.skill && (!!this._skillIdle() || this._skillLoopIsStance());
           if (clip && this.has(clip.end) && !toSkillIdle) { this._play(clip.end, false); this._queue(this._baseName(), true); }
           else this._play(this._baseName(), true, { mix: 0.15 });
         }

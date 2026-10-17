@@ -217,6 +217,86 @@ function walkKeys(node, add) {
 }
 
 /**
+ * Every summon outfit the official skin table lists: the `charSkins[*].tokenSkinMap` pairs `{ tokenId, tokenSkinId }`.
+ * This is the authoritative source of which skin re-models which summon — research 07 only names some of them
+ * (`tokens[*].battleSpineSkinVariantsOnly`, the older list the plan used to plan a single variant from).
+ * @param {any} table skin_table.json (.cache/skin-table.json, cached by tools/skins.mjs loadSkinTable)
+ * @returns {Map<string, string[]>} tokenId → tokenSkinId[] (unique, in table order)
+ */
+export function tokenSkinPairs(table) {
+  const out = new Map();
+  const skins = table && table.charSkins;
+  if (!skins || typeof skins !== 'object') return out;
+  for (const rec of Object.values(skins)) {
+    const map = rec && rec.tokenSkinMap;
+    if (!Array.isArray(map)) continue;
+    for (const e of map) {
+      if (!e || typeof e.tokenId !== 'string' || typeof e.tokenSkinId !== 'string') continue;
+      if (!e.tokenId || !e.tokenSkinId) continue;
+      const list = out.get(e.tokenId) || [];
+      if (!list.includes(e.tokenSkinId)) list.push(e.tokenSkinId);
+      out.set(e.tokenId, list);
+    }
+  }
+  return out;
+}
+
+/**
+ * The operator each summon's outfits belong to: tokenId → the charId of the first `tokenSkinMap` outfit that
+ * re-models it (`char_1033_swire2@ambienceSynesthesia#4` → `char_1033_swire2`). The pool's `tokensUsedByPool`
+ * attributes only the pool's own summons, so this is how a 自选 summon learns its owner (plan: `tokens[id].owner`).
+ * @param {any} table skin_table.json (.cache/skin-table.json)
+ * @returns {Map<string, string>} tokenId → charId
+ */
+export function tokenSkinOwners(table) {
+  const out = new Map();
+  const skins = table && table.charSkins;
+  if (!skins || typeof skins !== 'object') return out;
+  for (const [skinId, rec] of Object.entries(skins)) {
+    const map = rec && rec.tokenSkinMap;
+    if (!Array.isArray(map)) continue;
+    const charId = /^char_\d+_[a-z0-9_]+/i.exec(String(skinId))?.[0] || null;
+    if (!charId) continue;
+    for (const e of map) {
+      if (!e || typeof e.tokenId !== 'string' || !e.tokenId) continue;
+      if (!out.has(e.tokenId)) out.set(e.tokenId, charId);
+    }
+  }
+  return out;
+}
+
+/**
+ * The site stem of a token skin id: `token_10031_swire2_gdtrap_ambienceSynesthesia#4` →
+ * `token_10031_swire2_gdtrap_ambienceSynesthesia_4` — the folder and file stem the fexli mirror uses
+ * (`spine/<tokenId>/<stem>/{Front|Spine}/<stem>.*`), the same stem tools/skins.mjs stemOf() derives.
+ * @param {string} tokenSkinId
+ * @returns {string}
+ */
+export function tokenSkinStem(tokenSkinId) {
+  // exactly tools/skins.mjs stemOf(): the client's resolveTokenSkinSpineFromDisk looks for this file name on disk
+  return String(tokenSkinId).replace(/@/g, '_').replace(/#/g, '_');
+}
+
+/**
+ * The files of the skin-variant models (plan model keys `token:<tokenId>:<stem>`): every summon folder holds one model
+ * per outfit, but the manifest references only the token's own one (`tokens[id].spine`), so the other variants' files
+ * have no manifest entry. tools/fetch-assets.mjs keeps them from --prune with this list (dl.preserved).
+ * @param {Iterable<any>|Map<string, any>} models plan.models
+ * @returns {string[]} paths under public/assets
+ */
+export function variantModelFiles(models) {
+  const list = models && typeof models.values === 'function' ? models.values() : (models || []);
+  const out = [];
+  for (const m of list) {
+    if (!m || !/^token:[^:]+:.+$/.test(String(m.key))) continue;
+    for (const rel of [m.skel?.rel, m.atlas?.rel, ...(Array.isArray(m.pngs) ? m.pngs.map((p) => p?.rel) : [])]) {
+      if (typeof rel === 'string' && rel && !out.includes(rel)) out.push(rel);
+    }
+  }
+  return out;
+}
+
+/**
  * A research-07-shaped operator record of a character research 07 does not list (the 自选 owned-6★ picks): every URL
  * from the patterns of 07-assets.json `meta.patterns` — avatar / portrait (E0–E1 and E2), the default-skin battle Spine
  * Front / Back, the skill icons, the sub-profession icon. No expected byte counts (the downloader validates the files);
@@ -332,6 +412,9 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  *   (干员报到 / 编入队伍 / 任命队长) are never requested by the client and cost 360 files / 19.3 MB of downloads.
  * @param {string[]} [p.extraEnemyIds] more enemy ids that can spawn (e.g. keys of data/enemies.json)
  * @param {string[]} [p.extraTokenIds] more token ids (e.g. token_* keys of data/tokens.json)
+ * @param {any} [p.skinTable] the official skin_table.json (.cache/skin-table.json): its `charSkins[*].tokenSkinMap`
+ *   names every summon outfit (tokenId → tokenSkinId), planned as one Spine model per variant; without it only research
+ *   07's `battleSpineSkinVariantsOnly` is planned (the older, partial list)
  * @param {Record<string,string>} [p.extraHandbook] enemyId → handbook/model id (e.g. from data/bosses.json)
  * @param {Record<string, import('./spine.mjs').LocalSpineMeta>} [p.localEnemySpines] metadata of the enemy models the
  *   local client has (the committed tools/assets/local-enemy-spines.json, never the disk): each planned enemy listed
@@ -350,7 +433,7 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
 export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, charword = null, voiceLang = 'cn',
   voiceJp = true, voiceSlots = VOICE_BATTLE_SLOTS, optionalVoice = false,
   extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, localEnemySpines = {}, localTokenSpines = {}, extraOperators = {},
-  moduleTypes = [], statsTemplate = [] }) {
+  skinTable = null, moduleTypes = [], statsTemplate = [] }) {
   const notes = [];
   /** @type {Map<string, any>} */
   const models = new Map();
@@ -456,6 +539,19 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   // --- tokens --------------------------------------------------------------
   const chessById = new Map((ops03?.chess || []).map((c) => [c.chessId, c]));
   const tokens = {};
+  // The official table's summon outfits (tokenSkinMap). Every pair is planned as its own model, so a summon folder holds
+  // the model of every outfit that re-models it; research 07's `battleSpineSkinVariantsOnly` stays a fallback for a
+  // checkout without .cache/skin-table.json (it lists only some of the variants).
+  const outfitsByToken = tokenSkinPairs(skinTable);
+  const outfitOwnerOf = tokenSkinOwners(skinTable);
+  /** summons whose outfit owner is not an operator of this manifest (no `chars[owner]` → no owner to fill) */
+  const ownerOutOfPlan = new Map();
+  // Skin-variant models live in a `Spine/` folder, or `Front/` for directional ones; the folder is named by the
+  // tokenId, the files by the token skin's stem (not `spine/token/<tokenId>/…`).
+  const tokenVariantRec = (tokenId, stem) => {
+    const bases = ['Spine', 'Front'].map((f) => `${RAW.fexli}spine/${encodeURIComponent(tokenId)}/${encodeURIComponent(stem)}/${f}/${encodeURIComponent(stem)}`);
+    return { skel: bases.map((b) => b + '.skel'), atlas: bases.map((b) => b + '.atlas'), png: bases.map((b) => b + '.png') };
+  };
   const tokenIds = new Set(Object.keys(assets07?.tokens || {}));
   for (const id of extraTokenIds) if (typeof id === 'string' && /^token_\d+_[a-z0-9_]+$/i.test(id)) tokenIds.add(id);
   for (const id of [...tokenIds].sort()) {
@@ -468,20 +564,43 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     const usedBy = ops03?.tokensUsedByPool?.[id]?.usedByChess || [];
     const ownerChess = usedBy.map((cid) => chessById.get(cid)).find(Boolean);
     const entry = { owner: ownerChess?.charId || ownerChess?.backup?.charId || null };
+    // 换装 (召唤物): the pool's tokensUsedByPool names only the pool's own summons. A summon an outfit re-models still
+    // belongs to that outfit's operator — assets.js tokenSkinSpine resolves the outfit through tokens[id].owner — so an
+    // ABSENT owner is derived from the skin table's tokenSkinMap (an owner the pool already names is never replaced).
+    // An operator outside this manifest cannot be derived (its outfit is not drawn anyway): counted in the note below.
+    if (!entry.owner) {
+      const outfitOwner = outfitOwnerOf.get(id);
+      if (outfitOwner && chars[outfitOwner]) entry.owner = outfitOwner;
+      else if (outfitOwner) ownerOutOfPlan.set(id, outfitOwner);
+    }
     entry.avatar = t.avatar?.url ? leaf(alt(`token/avatar/${id}.png`, t.avatar.url, t.avatar.bytes)) : null;
+    // Every outfit of this summon: research 07's list first (its first variant is the one the manifest has always
+    // carried as `entry.spineVariant`), then the official table's pairs (tokenSkinMap) research 07 does not list.
+    const variants = [...new Set([
+      ...(Array.isArray(t.battleSpineSkinVariantsOnly) ? t.battleSpineSkinVariantsOnly.filter((v) => typeof v === 'string' && v) : []),
+      ...(outfitsByToken.get(id) || []).map(tokenSkinStem).filter(Boolean),
+    ])];
     let model = null;
+    /** the variant that became the summon's own model (`entry.spineVariant`), if any */
+    let primaryVariant = null;
     if (t.battleSpineDefault) {
       model = fexliModel(`token:${id}`, 'token', `spine/token/${id}/`, t.battleSpineDefault, [0]);
-    } else if (Array.isArray(t.battleSpineSkinVariantsOnly) && t.battleSpineSkinVariantsOnly.length) {
-      // Skin-variant models live in a `Spine/` folder, or `Front/` for directional ones.
-      const v = t.battleSpineSkinVariantsOnly[0];
-      const bases = ['Spine', 'Front'].map((f) => `${RAW.fexli}spine/${encodeURIComponent(id)}/${encodeURIComponent(v)}/${f}/${encodeURIComponent(v)}`);
-      model = fexliModel(`token:${id}`, 'token', `spine/token/${id}/`, {
-        skel: bases.map((b) => b + '.skel'), atlas: bases.map((b) => b + '.atlas'), png: bases.map((b) => b + '.png'),
-      }, [0]);
-      if (model) entry.spineVariant = v;
+    } else if (variants.length) {
+      primaryVariant = variants[0];
+      model = fexliModel(`token:${id}`, 'token', `spine/token/${id}/`, tokenVariantRec(id, primaryVariant), [0]);
+      if (model) entry.spineVariant = primaryVariant;
     }
     entry.spine = model;
+    if (variants.length) {
+      // The variants the summon's own model does not already carry: one model each, same folder (`dir`), own key, so
+      // processModels downloads and parses them all. tools/skins.mjs reads them straight from the disk
+      // (resolveTokenSkinSpineFromDisk), so the manifest field is only informational.
+      entry.spineVariants = variants;
+      for (const stem of variants) {
+        if (stem === primaryVariant) continue;
+        fexliModel(`token:${id}:${stem}`, 'token', `spine/token/${id}/`, tokenVariantRec(id, stem), [0]);
+      }
+    }
     // the official model from the local client, drawn instead of the avatar (or of `spine`) when extracted (optional)
     const loc = localTokenSpines && Object.hasOwn(localTokenSpines, id) ? localTokenSpines[id] : null;
     if (loc && typeof loc === 'object') {
@@ -492,6 +611,25 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     const { roles: u, mix } = unitSounds(audio, pickUnitSfx(audio.unitBanks.get(id)));
     if (mix) u.mix = mix;
     if (Object.keys(u).length) unitsSfx[id] = u;
+  }
+  // Summons this fork's pool / data do not list (no `tokens[id]` entry) still get the models of their outfits: the
+  // files land in the same folders, so an operator added later finds them on disk (tools/skins.mjs inject reads the
+  // disk, not the manifest). Not listed in the manifest — there is no avatar or owner for them here.
+  for (const [id, tokenSkinIds] of [...outfitsByToken].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (tokenIds.has(id)) continue;
+    ownerOutOfPlan.set(id, outfitOwnerOf.get(id) || null); // no entry → no owner, but say which outfits are lost
+    for (const tokenSkinId of tokenSkinIds) {
+      const stem = tokenSkinStem(tokenSkinId);
+      if (stem) fexliModel(`token:${id}:${stem}`, 'token', `spine/token/${id}/`, tokenVariantRec(id, stem), [0]);
+    }
+  }
+  if (ownerOutOfPlan.size) {
+    const charsOut = [...new Set([...ownerOutOfPlan.values()].filter(Boolean))].sort();
+    let outfits = 0;
+    for (const id of ownerOutOfPlan.keys()) outfits += (outfitsByToken.get(id) || [null]).length;
+    notes.push(`${outfits} summon outfit(s) belong to operators outside this manifest (${charsOut.slice(0, 6).join(', ')}` +
+      `${charsOut.length > 6 ? ', …' : ''}): their summons have no tokens[*] entry / owner, so tools/skins.mjs inject writes ` +
+      'no outfit for them (add the operator to the pool for its outfit to draw)');
   }
 
   // --- enemies -------------------------------------------------------------

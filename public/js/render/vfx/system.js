@@ -14,9 +14,11 @@
 //
 // Pooling and caps: compiled prefabs are shared (library); instances are cheap records over them. The live effects are
 // capped per tier (MAX_EFFECTS) and so is the sum of live particles (MAX_PARTICLES): past it, new one-shot effects are
-// skipped (loops and projectiles still start). A prefab not loaded yet starts when it arrives if that is within
-// LATE_START s (else a one-shot is dropped); the battle's units preload their effects at the prep → battle switch.
-// Effects never touch the sim: they only read the views (render/vfx/wiring.js).
+// skipped (loops and projectiles still start). A ground decal — `spawn` `decal`, render/vfx/skills.js FX_BINDINGS
+// `decal`: 黍's sown tiles — is outside the effect cap (it may be laid any number of times for as long as its owner
+// stands) and does not use up the budget of the battle's one-shots. A prefab not loaded yet starts when it arrives if
+// that is within LATE_START s (else a one-shot is dropped); the battle's units preload their effects at the prep →
+// battle switch. Effects never touch the sim: they only read the views (render/vfx/wiring.js).
 
 import { FxLibrary } from './library.js';
 import { FxGL } from './gl.js';
@@ -132,6 +134,7 @@ export class OfficialFx {
     this.items = { ground: [], over: [] };
     this.needDepth = false;
     this.particles = 0;
+    this.plain = 0;            // live effects outside the decal pool: what MAX_EFFECTS caps
     this.dropped = 0;
     this.hfSig = null;
     this.paused = false;
@@ -172,17 +175,17 @@ export class OfficialFx {
 
   /**
    * Start an effect. place: { pos (Unity), yaw, pitch, mirror, groundZ }; opts: { loop?: boolean (keep pending until
-   * it loads), important?: boolean, seed?: number, track?: fn, onFinish?: fn, data?: any, skip?: s to start it in,
-   * owner?: the unit it plays on (PauseAnotherEffect pauses by it) }.
+   * it loads), important?: boolean, decal?: boolean (a ground decal: outside MAX_EFFECTS, see `_room`), seed?: number,
+   * track?: fn, onFinish?: fn, data?: any, skip?: s to start it in, owner?: the unit it plays on (PauseAnotherEffect
+   * pauses by it) }.
    * Returns a handle (its `effect` is null until the prefab is loaded) or null when off / absent / over the caps.
    */
   spawn(key, place, opts = {}) {
     if (!this.active || !key) return null;
     const k = String(key).toLowerCase();
     if (!this.lib.has(k)) return null;
-    const lim = MAX_EFFECTS[this.tier] || 200;
     const important = !!opts.loop || !!opts.important;
-    if (!important && (this.effects.length >= lim || this.particles >= (MAX_PARTICLES[this.tier] || 5000))) { this.dropped++; return null; }
+    if (!important && !this._room()) { this.dropped++; return null; }
     const handle = new FxHandle(this, k, place, opts);
     const def = this.lib.def(k);
     if (def) handle._start(def);
@@ -202,14 +205,24 @@ export class OfficialFx {
     return handle;
   }
 
+  /**
+   * Whether a new one-shot may start: the live non-decal effects under the tier's effect cap and the particle sum under
+   * its own. A ground decal (`opts.decal`; render/vfx/skills.js FX_BINDINGS `decal`) is outside the effect cap — the
+   * battle lays as many as it lasts (`hold: 'owner'`) — so the battle's one-shots keep their whole budget.
+   */
+  _room() {
+    return this.plain < (MAX_EFFECTS[this.tier] || 200) && this.particles < (MAX_PARTICLES[this.tier] || 5000);
+  }
+
   _add(fx) {
     const lim = MAX_EFFECTS[this.tier] || 200;
-    if (this.effects.length >= lim * 1.25) {
-      // over the hard limit: the oldest one-shot goes
-      const i = this.effects.findIndex((e) => !e.def.loops);
-      if (i >= 0) this.effects.splice(i, 1)[0].kill();
+    if (this.plain >= lim * 1.25) {
+      // over the hard limit: the oldest one-shot goes (a decal instance is a loop and stays)
+      const i = this.effects.findIndex((e) => !e.decal && !e.def.loops);
+      if (i >= 0) { this.effects.splice(i, 1)[0].kill(); this.plain = Math.max(0, this.plain - 1); }
     }
     this.effects.push(fx);
+    if (!fx.decal) this.plain++;
   }
 
   /** Advance every effect by dt battle seconds. */
@@ -217,15 +230,17 @@ export class OfficialFx {
     const d = dt > 0 ? Math.min(dt, 0.25) : 0;
     this.time += d;
     this.frameNo++;
-    let w = 0, parts = 0;
+    let w = 0, parts = 0, plain = 0;
     for (const fx of this.effects) {
       if (d > 0) fx.update(d);
       if (fx.done) { if (fx.handle) { fx.handle.effect = null; fx.handle.done = true; } this._recycle(fx); continue; }
       for (const s of fx.sys) if (s) parts += s.count;
+      if (!fx.decal) plain++;
       this.effects[w++] = fx;
     }
     this.effects.length = w;
     this.particles = parts;
+    this.plain = plain;
     this._pauseOthers();
   }
 
@@ -309,6 +324,8 @@ export class OfficialFx {
   clear() {
     for (const fx of this.effects) fx.kill();
     this.effects.length = 0;
+    this.plain = 0;
+    this.particles = 0;
     for (const h of this.pending) h.cancelled = true;
     this.pending.length = 0;
   }
@@ -444,6 +461,7 @@ export class FxHandle {
       fx.ttl = def.isLoop ? LOOP_TTL : Number.isFinite(d) && d > 0 ? Math.min(ONE_SHOT_TTL * 2, d + def.delayToPlay + 0.5) : ONE_SHOT_TTL;
     }
     fx.data = this.opts.data ?? null;
+    fx.decal = !!this.opts.decal;
     if (this.opts.onFinish) fx.onFinish = this.opts.onFinish;
     // a chained effect of the prefab itself (OnPlayEmitter) starts with the same placement and owner; a looping one
     // stops with it (OnFinishEmitter's start where it finished)

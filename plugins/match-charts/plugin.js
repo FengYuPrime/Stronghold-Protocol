@@ -1,4 +1,5 @@
-// 「战后统计」插件（plugins/match-charts）—— 结算页「模拟完成」标题旁的按钮 + 白底黑字的 ECharts 折线图。
+// 「战后统计」插件（plugins/match-charts）—— 结算页「模拟完成」标题旁的按钮 + 白底黑字的 ECharts 统计弹窗
+// （下拉框选回合，画该回合各单位的占比饼图）。
 //
 // 与「战斗统计悬浮窗」（plugins/dps-meter）是**两个互相独立的插件**：本插件自己每 250 ms 取样一次
 // （`battleRunner.fieldUnits()`），自己按回合累计、自己在结算时把这一局的每回合明细存档 ——
@@ -104,7 +105,7 @@ export function sampleRound(api) {
   // （作者的原话：a field other than the one on screen → []），换场 / 观战 / 联防时会整帧取空。
   // 直接读 `e.battle.allyUnits` 则每个客户端持有的战场都能取到，且和 `fieldUnits` 读的是同一份数据。
   const entries = (() => { try { return runner?._entries; } catch { return null; } })();
-  // 只看**自己的**干员：观战队友 / 联防共用战场时同屏还有他的干员，混进曲线就不是「我的每回合输出」了。
+  // 只看**自己的**干员：观战队友 / 联防共用战场时同屏还有他的干员，混进统计就不是「我的每回合输出」了。
   // ownerId 为空的单位（召唤物等没带归属的）仍然保留。
   const me = myPlayerId(api);
   const battles = [];
@@ -124,7 +125,7 @@ export function sampleRound(api) {
     try { data = runner?.fieldUnits?.(null) || null; } catch { data = null; }
     if (data && Array.isArray(data.units) && data.units.length) {
       // 兜底这条路也要按归属过滤：观战队友时 `fieldUnits(null)` 给的就是**他的**干员，
-      // 直接收下会把队友的数据记进我的曲线（战后统计只记自己的）。
+      // 直接收下会把队友的数据记进我的统计（战后统计只记自己的）。
       // 注意**不要**再过一遍 battleUnits()：`fieldUnits()` 返回的已经是拍平后的单位（runner.js：dmg/heal/taken/
       // attacks/kills 都在顶层），再过一次会被当成「没有 stats」，每个单位都记成 0 —— 整局 0 行数据。
       const units = data.units.filter((u) => u && (!u.ownerId || !me || u.ownerId === me));
@@ -254,18 +255,18 @@ export default function register(api) {
   const stopRecorder = createRecorder(api, () => {
     const merged = withLiveRound(history, live, { label: api.t('最后一回合') });
     // 兜底：内存里空了就用落盘快照（`sp.charts.latest`，每次回合收尾都写）。内存被清空时（结算前后 store 抖动
-    // 触发过「新一局」清理）这一局仍然能存下来，而不是让图表退回上一局。
+    // 触发过「新一局」清理）这一局仍然能存下来 —— 注意这是**本局**的快照，不是上一局的存档。
     const snap = merged.length ? [] : readLatest();
     api.log?.(`match settled: handing over ${merged.length} round(s) (closed ${history.length} + live ${live.rows.length} rows · rowTicks ${rowTicks})`
       + (merged.length ? ' — ok' : snap.length ? ` — MEMORY EMPTY, recovered ${snap.length} round(s) from the snapshot` : ' — NOTHING TO ARCHIVE (no data was ever sampled)'));
     return merged.length ? merged : snap;
   });
 
-  // 新一局开始：清掉上一局的回合（否则新一局的曲线会把上一局的回合算进去）。
+  // 新一局开始：清掉上一局的回合（否则新一局的统计会把上一局的回合算进去）。
   //
   // 「新一局」判定要防抖动：战斗结束前后 store 可能瞬间没有 match.public（false → true 一闪），
   // 那种抖动如果当成新一局，就会把刚打完这局的回合全擦掉 —— 结算事件紧接着到达，于是变成
-  // 「NOTHING TO ARCHIVE」、图表一直显示上一局（用户报的现象）。所以只在**确实闲置过一段时间**后才清。
+  // 「NOTHING TO ARCHIVE」、图表没有这一局的数据（用户报的现象）。所以只在**确实闲置过一段时间**后才清。
   const NEW_MATCH_GAP_MS = 1200;
   let offStore = () => {};
   const store = api.store;

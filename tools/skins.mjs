@@ -42,6 +42,17 @@ const RESEARCH_FALLBACKS = [
   'G:/卫/纸鸢/Stronghold-Protocol/docs/research/08-skins.json',
 ].filter(Boolean);
 const MANIFEST = join(ROOT, 'data', 'assets.json');
+/**
+ * Resolve every numbered skill clip of a skin skeleton (`anims.skills`), not just the indices the plan hands in.
+ *
+ * A skin is resolved on its own, without the operator's skill list: an outfit's `rec.skills` does not exist in
+ * `data/assets.json` (the manifest carries no skill table), so `skillIndices` was always `[0]` and a model whose clips
+ * are Skill_2 / Skill_3 got `anims.skill = { via: 'attack' }` and no `skills` map — 史尔特尔 wearing 自由//失效 opened
+ * S3 with her normal attack swing instead of Skill_3_Begin/Loop/Idle, though the outfit's skeleton ships those clips
+ * (test/skins.test.js "every skill clip of an outfit's model is mapped"). Numbered resolution takes what the skeleton
+ * has, which is exactly the per-outfit model in hand.
+ */
+const SKIN_NUMBERED_SKILLS = true;
 /** `charId/stem → layoutKey` (fetch remembers which upstream layout answered; a re-run costs no probing). */
 const LAYOUT_CACHE = join(ROOT, '.cache', 'skins-layout.json');
 
@@ -384,7 +395,7 @@ export async function resolveSkinSpine(charId, stem, side, urls, opts = {}) {
   try { sk = parseSkel(await readFile(skelFile), info.regions); } catch (e) { return { entry: null, why: `skel 解析失败: ${e.message}` }; }
   if (!sk.animations || !sk.animations.length) return { entry: null, why: '骨骼没有动画' };
   // `resolveRoles` 直接返回 roles 对象（tools/assets/anim-roles.mjs:298-311），生产管线也是 `const anims = resolveRoles(...)`
-  const anims = resolveRoles(sk.animations, { skillIndices: opts.skillIndices, numberedSkills: false, durations: sk.durations });
+  const anims = resolveRoles(sk.animations, { skillIndices: opts.skillIndices, numberedSkills: SKIN_NUMBERED_SKILLS, durations: sk.durations });
   // 没有 anims 的条目客户端会拒绝（validSpine）并一直停在占位头像上：宁可不写 spine 块，让渲染回退到干员默认模型
   if (!anims || typeof anims !== 'object' || !anims.idle) return { entry: null, why: 'anims 解析不出（骨骼的动画名不认识）' };
   return {
@@ -891,7 +902,7 @@ export async function resolveSkinSpineFromDisk(charId, stem, side, opts = {}) {
   let sk;
   try { sk = parseSkel(await readFile(join(dir, skelName)), info.regions); } catch (e) { return { entry: null, why: `skel 解析失败: ${e.message}` }; }
   if (!sk.animations || !sk.animations.length) return { entry: null, why: '骨骼没有动画' };
-  const anims = resolveRoles(sk.animations, { skillIndices: opts.skillIndices, numberedSkills: false, durations: sk.durations });
+  const anims = resolveRoles(sk.animations, { skillIndices: opts.skillIndices, numberedSkills: SKIN_NUMBERED_SKILLS, durations: sk.durations });
   if (!anims || typeof anims !== 'object' || !anims.idle) return { entry: null, why: 'anims 解析不出（骨骼的动画名不认识）' };
   const base = `/assets/spine/op/${charId}/${stem}/${side}`;
   return {
@@ -908,6 +919,90 @@ export async function resolveSkinSpineFromDisk(charId, stem, side, opts = {}) {
     },
     why: '',
   };
+}
+
+/**
+ * The summons one outfit re-models — the official `skin_table.json` `tokenSkinMap` of `skinId`:
+ * `[{ tokenId, tokenSkinId }]` (null/absent on most skins: that outfit swaps no token model).
+ *
+ * Real samples (`.cache/skin-table.json`, the table `loadSkinTable` caches):
+ *   char_1033_swire2@ambienceSynesthesia#4 → [{ tokenId: 'token_10031_swire2_gdtrap',
+ *                                               tokenSkinId: 'token_10031_swire2_gdtrap_ambienceSynesthesia#4' }]
+ *   char_003_kalts@sale#14                 → [{ tokenId: 'token_10002_kalts_mon3tr', tokenSkinId: '…_sale#14' }]
+ * @param {any} table skin_table.json @param {string} skinId @returns {{ tokenId: string, tokenSkinId: string }[]}
+ */
+export function tokenSkinMapOf(table, skinId) {
+  const rec = table && table.charSkins && table.charSkins[skinId];
+  const list = rec && Array.isArray(rec.tokenSkinMap) ? rec.tokenSkinMap : [];
+  return list
+    .filter((e) => e && typeof e.tokenId === 'string' && typeof e.tokenSkinId === 'string')
+    .map((e) => ({ tokenId: e.tokenId, tokenSkinId: e.tokenSkinId }));
+}
+
+/**
+ * The manifest `Spine` object of a summon's OUTFIT model, read from the files on disk:
+ * `public/assets/spine/token/<tokenId>/<stem>.{skel,atlas,png}` — one flat folder per token, the files named after the
+ * token skin's stem (`token_10031_swire2_gdtrap_ambienceSynesthesia_4`, stemOf()). The asset pipeline puts the upstream
+ * skin-variant models there (tools/assets/plan.mjs `spineVariant`), so this resolves the same shape as a skin's model.
+ * @param {string} tokenId @param {string} stem the token skin's stem
+ * @returns {Promise<{ entry: object|null, why: string }>}
+ */
+export async function resolveTokenSkinSpineFromDisk(tokenId, stem, opts = {}) {
+  const dir = join(ROOT, 'public', 'assets', 'spine', 'token', tokenId);
+  if (!existsSync(dir)) return { entry: null, why: '文件不全' };
+  let names;
+  try { names = await readdir(dir); } catch { return { entry: null, why: '目录不可读' }; }
+  const skelName = `${stem}.skel`;
+  const atlasName = `${stem}.atlas`;
+  if (!names.includes(skelName) || !names.includes(atlasName)) return { entry: null, why: '文件不全' };
+  let info;
+  try { info = atlasInfo(await readFile(join(dir, atlasName), 'utf8')); } catch (e) { return { entry: null, why: `atlas 解析失败: ${e.message}` }; }
+  // the page names in the atlas are the site names the pipeline normalised to; fall back to the variant's own pages
+  const pages = names.filter((n) => info.pages.includes(n));
+  const pngs = pages.length ? pages : names.filter((n) => /\.(png|jpg|webp)$/i.test(n) && n.startsWith(stem) && !/\[alpha\]/i.test(n));
+  if (!pngs.length) return { entry: null, why: '图集页缺失' };
+  let sk;
+  try { sk = parseSkel(await readFile(join(dir, skelName)), info.regions); } catch (e) { return { entry: null, why: `skel 解析失败: ${e.message}` }; }
+  if (!sk.animations || !sk.animations.length) return { entry: null, why: '骨骼没有动画' };
+  const anims = resolveRoles(sk.animations, { skillIndices: opts.skillIndices, numberedSkills: SKIN_NUMBERED_SKILLS, durations: sk.durations });
+  if (!anims || typeof anims !== 'object' || !anims.idle) return { entry: null, why: 'anims 解析不出（骨骼的动画名不认识）' };
+  const base = `/assets/spine/token/${tokenId}`;
+  return {
+    entry: {
+      skel: `${base}/${skelName}`,
+      atlas: `${base}/${atlasName}`,
+      textures: pngs.map((n) => `${base}/${n}`),
+      pma: !!info.hasPma,
+      anims,
+      animations: sk.durations,
+      events: sk.events,
+      hits: sk.hits,
+      bounds: sk.bounds,
+    },
+    why: '',
+  };
+}
+
+/**
+ * The `tokens` block inject writes into one outfit's manifest entry:
+ * `{ [tokenId]: { tokenSkinId, spine } }` for every `tokenSkinMap` entry whose model is on disk (a mapped token this
+ * install has no files for is left out — the renderer keeps the token's own model, docs/SKINS.md "召唤物").
+ *
+ * The spine is the asset pipeline's own parsed entry when it is the file the map names (`tokens[id].spineVariant`),
+ * else re-parsed from disk (the same skel/atlas/anims rules as the operators' skins).
+ * @param {any} manifest data/assets.json @param {string} skinId @param {any} table skin_table.json
+ * @returns {Promise<Record<string, { tokenSkinId: string, spine: object }>>}
+ */
+export async function tokenSkinEntries(manifest, skinId, table) {
+  const out = {};
+  for (const { tokenId, tokenSkinId } of tokenSkinMapOf(table, skinId)) {
+    const stem = stemOf(tokenSkinId);
+    const tok = manifest && manifest.tokens ? manifest.tokens[tokenId] : null;
+    let spine = tok && tok.spineVariant === stem && tok.spine && tok.spine.skel && tok.spine.anims ? tok.spine : null;
+    if (!spine) spine = (await resolveTokenSkinSpineFromDisk(tokenId, stem)).entry;
+    if (spine) out[tokenId] = { tokenSkinId, spine };
+  }
+  return out;
 }
 
 /**
@@ -1211,7 +1306,11 @@ async function commandInject(o) {
   if (o.spine !== false && !canParse) {
     log('[skins] 警告：@pixi-spine/runtime-3.8 不在（先 npm install）——这次只写头像与名字，spine 留待下次 inject');
   }
-  let withModels = 0; let withAvatars = 0; let skipped = 0; const problems = [];
+  // the official tokenSkinMap of each outfit (换装 召唤物): cached in .cache/skin-table.json; offline without the cache
+  // the outfits are written without a `tokens` block (the summons keep their own model, which is what shipped so far)
+  const table = await loadSkinTable({ log });
+  if (!table) log('[skins] 没有官方皮肤表（.cache/skin-table.json 且离线）：这次不写召唤物的换装模型');
+  let withModels = 0; let withAvatars = 0; let withTokenSkins = 0; let skipped = 0; const problems = [];
   const layouts = o.fix ? await readJson(LAYOUT_CACHE).catch(() => ({})) : {};
   for (const j of jobs) {
     const rec = manifest.chars[j.charId];
@@ -1235,6 +1334,12 @@ async function commandInject(o) {
         problems.push(`${j.skinId}: ${front.why}`);
       }
     }
+    // 换装 (召唤物皮肤): the summons this outfit re-models (official skin_table.json `tokenSkinMap`) — only the models
+    // this install really has; the renderer draws them for the owner's summoned tokens (assets.js tokenSkinSpine) and
+    // keeps the token's own model otherwise (docs/SKINS.md "召唤物"). Needs the skin table: cached in .cache/.
+    const tokenSkins = table ? await tokenSkinEntries(manifest, j.skinId, table) : {};
+    const tokenCount = Object.keys(tokenSkins).length;
+    if (tokenCount) { entry.tokens = tokenSkins; withTokenSkins += tokenCount; }
     if (!rec.skins) rec.skins = {};
     rec.skins[j.skinId] = entry;
     if (hasAvatar) withAvatars++;
@@ -1244,11 +1349,11 @@ async function commandInject(o) {
     return 0;
   }
   if (o.dryRun) {
-    log(`[skins] --dry-run：将写入 ${withAvatars} 个头像、${withModels} 套带模型（未写文件）`);
+    log(`[skins] --dry-run：将写入 ${withAvatars} 个头像、${withModels} 套带模型、${withTokenSkins} 个召唤物换装模型（未写文件）`);
     return 0;
   }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 1) + '\n');
-  log(`[skins] 写入 ${relative(ROOT, manifestPath)}：${withAvatars} 个头像，${withModels} 套带模型（跳过 ${skipped} 名不在清单里的干员）`);
+  log(`[skins] 写入 ${relative(ROOT, manifestPath)}：${withAvatars} 个头像，${withModels} 套带模型，${withTokenSkins} 个召唤物换装模型（跳过 ${skipped} 名不在清单里的干员）`);
   log(`[skins] anims 由构建期解析生成（tools/assets/anim-roles.mjs），客户端 validSpine() 因此能接受这些模型`);
   for (const p of problems.slice(0, 10)) log(`  ! ${p}`);
   if (problems.length > 10) log(`  ! 另有 ${problems.length - 10} 条见上（多数是上游单侧模型缺失或骨骼损坏）`);
@@ -1313,7 +1418,8 @@ const HELP = `Usage: node tools/skins.mjs <plan|sync|normalize|portraits|layout|
   layout    probe which upstream model layout each skin uses and remember it (.cache/skins-layout.json)
   local     copy the skins out of a complete local dump (--from=<库根>) instead of downloading them
   fetch     download the avatars and Spine models of the research table into public/assets
-  inject    write the skins that are on disk into data/assets.json (chars[charId].skins, anims resolved)
+  inject    write the skins that are on disk into data/assets.json (chars[charId].skins, anims resolved; plus the
+            summons each outfit re-models — the official skin_table tokenSkinMap — as skin.tokens[tokenId])
   verify    check that every skin the manifest lists really loads (validSpine rules, files on disk)
             --fix re-resolves the anims of entries an older inject left without it (nothing else is touched)
 Options:

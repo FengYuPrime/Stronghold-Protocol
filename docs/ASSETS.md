@@ -295,9 +295,18 @@ All paths are URL paths relative to the site root, for example `/assets/char/ava
                           spineLocal?: { group, skel, atlas, textures, …Spine } } },
                           // spineLocal: an optional local-client model; file names in a data/local-assets.json group,
                           // not URLs, and always emitted (independent of the disk) — "Enemy aliases" below
-  tokens:  { [tokenId]: { owner: charId|null, avatar?, spine?: Spine, spineVariant?: string,
+  tokens:  { [tokenId]: { owner: charId|null, avatar?, spine?: Spine, spineVariant?: string, spineVariants?: string[],
                           spineLocal?: { group, skel, atlas, textures, …Spine } } },
+                          // owner: the operator whose outfit re-models the summon. A pool summon gets it from
+                          // 03-operators.json tokensUsedByPool; a summon the pool does not attribute (a 自选 pick's
+                          // summon) takes it from the skin table's tokenSkinMap entry (the outfit's charId) — an owner
+                          // the table/pool already names is never replaced, and no owner is derived from an operator
+                          // this manifest does not list (its outfit cannot be drawn anyway).
                           // spineLocal: as for enemies — "Token models from the local client" below
+                          // spineVariant / spineVariants: the summon's own model is one of its outfits (its first
+                          // skin-variant file, when the summon has no default model); spineVariants lists every outfit
+                          // stem planned for it (official skin_table.json tokenSkinMap). Only that one model is in this
+                          // manifest — the other variants' files share its folder for tools/skins.mjs inject.
   bonds:   { [bondId]: url },       // white glyphs; tint in CSS/canvas
   items:   { [trapId]: url },
   bands:   { [bandId]: url },
@@ -528,7 +537,7 @@ Other renderer rules from research 07 §5.4–5.5:
 - **Tokens:**
   - Without an avatar, use `chars[owner].avatar` with a 召唤物 badge, or `prof.battlecard.token` — except 圣聆初雪's 保护目标（冻结状态） (PRTS 无头像; the frozen gate), drawn as a procedural ice diamond (`render/units.js ICE_TOKENS`).
   - Without a Spine (and without its local-client model, "Token models from the local client"), draw the avatar sprite with a bob tween.
-  - `spineVariant` names the skin-variant model that stands in for the missing default model.
+  - `spineVariant` names the skin-variant model that stands in for the missing default model; `spineVariants` lists every outfit stem the plan fetched for the summon (the others' files share its folder and are not in this manifest).
 - **Enemies without a spine** (for example `enemy_9016_acstmr`): draw `icon` in a diamond. Enemies with no manifest entry at all (`enemy_5601_entlec` 心烛): draw a procedural glyph.
 - **Battle effects** (projectiles per kind, hit sparks and slashes, skill bursts and auras, 蕾缪安's lock reticles and shells, 回环射手 boomerangs — DESIGN §17.3) are procedural by default: the FX atlas is drawn at run time (`public/js/render/textures.js`), so they need no downloaded or local art. Since 0.3.0 the official battle effects can be extracted from the local client (`tools/local-extract/extract.py --only fx --fx-set used`, opt-in; the files under `public/assets/local/fx/` with their own file list `data/local-fx.json`, DESIGN §33). When the served list names effects, 设置「官方特效」 appears and the 3D board draws them in WebGL2 (`public/js/render/vfx/`, DESIGN §9 "Official battle effects"): normal attacks' casts, projectiles and hits (a multi-hit attack's hit groups, an enemy's blow on a blocker), heals, status loops, deaths and deploys, the operators' and summons' skills, passive ones included (their start, loop, end, ready and range effects, the skill attacks' casts, hit groups and projectiles, the buffs on their targets), the enemies' skills (the sim names each use), the units' talents and abilities (deploy, passive, toggled and 重生 effects) and 深靛's stored energies. They come from the server's files, so every player of that server sees them, whatever client they have. Effects the battle gives no moment for (a buff template's cast at an event the client never sees), a unit the effects' index does not list, the 2D and simplified boards, a browser without WebGL2 and an install without the files keep the procedural effects; a missing texture or mesh leaves that part of an effect undrawn. The older sprites of `battle/[pack]common.ab` (`projectile_arrow(_new)`, `projectile_crossbow(_new)`, `projectile_yuki`, `img_fx_light_01/02`, `trail_11`) are still not extracted: the sim's `arrow` also covers gun snipers.
 - **Spine memory** (`public/js/assets.js`): skeletons are refcounted in an LRU with an idle budget (`SPINE_IDLE_BYTES`, 48 MB) and a 15 s grace; eviction runs `SPINE_EVICT_DELAY_MS` (1 s) after a release, the "no scene on screen" budget (0 bytes) applies after `SPINE_QUIET_DELAY_MS` (3 s) with nothing referenced, and a skeleton whose unload is still in flight is never handed out again — a new load waits for the unload (DESIGN §17.1; it used to leave operators invisible after a battle → prep switch).

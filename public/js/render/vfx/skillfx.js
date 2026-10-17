@@ -107,6 +107,8 @@ export const FLASH = Object.freeze(new Set(['blast', 'buff', 'wave', 'pillar', '
 /** Archetypes that show a unit's state or a game fact (never replaced by a skill's pulse). */
 const NOT_PULSE = new Set(['none', 'dp', 'coin', 'lp', 'crate', 'down', 'reticle', 'mark', 'summon', 'vanish', 'blink', 'move', 'sleep', 'lift', 'dodge', 'crit', 'telegraph', 'zone', 'wall', 'shell']);
 const DIRS = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+/** The one spot an FX_BINDINGS entry without `tiles` plays at: its fx's own (x, y) (skills.js `tiles`). */
+const NO_TILES = Object.freeze([[0, 0]]);
 /** Ability events a row starts with the cast (ON_ATTACHED, ON_CAST_START); the others at the strike. */
 const CAST_START = new Set([0, 2]);
 /** Battle seconds an enemy's skill window outlasts its start before the snapshot's anim may end it (the sim's 0.5 s). */
@@ -248,7 +250,7 @@ export class SkillFx {
       buffS: buffDuration(r.srec), tHit: plan ? targetsOf(idx, plan).hit : [], drawsStart: draws,
       on: null, startFrame: -1, offAt: -Infinity, atkN: 0, attacked: false, byFlag: false, loopsOn: false,
       loops: [], ready: [], readyOn: false, passiveOn: false, passiveShots: false, passiveDraws: false, passiveDone: false, timed: false,
-      energy: 0, slotLoops: [], guardUntil: -Infinity, quiet: false, trigFrame: -1, seen: 0,
+      energy: 0, slotLoops: [], decals: [], guardUntil: -Infinity, quiet: false, trigFrame: -1, seen: 0,
       // an enemy's skills by slot (index v2), how many its data record has, its skill window, plans of other modes
       enemy: r.enemy || [], enemySlots: Array.isArray(rec?.skills) ? rec.skills.length : 0, ewin: null, prevAnim: 0, modePlans: new Map(),
     };
@@ -650,6 +652,10 @@ export class SkillFx {
     this._stopReady(U);
     for (const hs of U.slotLoops) for (const h of hs || []) h.stop();
     U.slotLoops = [];
+    // the ground decals a binding holds for the owner's whole deployment (skills.js `hold: 'owner'`, 黍's sowing): they
+    // go with her — the sim clears her sown tiles on death / retreat
+    for (const h of U.decals) h.stop();
+    U.decals = [];
     U.energy = 0;
     U.passiveOn = false;
     U.passiveShots = false;
@@ -846,7 +852,7 @@ export class SkillFx {
       if (!U) continue;
       U.seen = sweep;
       const up = v.alive !== false && !v.destroyed && !v.down;
-      if (!up) { if (U.loopsOn || U.readyOn || U.passiveOn || U.energy || U.ewin) this._releaseU(U); continue; }
+      if (!up) { if (U.loopsOn || U.readyOn || U.passiveOn || U.energy || U.ewin || U.decals.length) this._releaseU(U); continue; }
       if (U.enemy.length) {
         // an enemy's skill window: the snapshot's anim SKILL (the sim's 0.5 s after an ability fires); with no 'cast'
         // slot event, an enemy whose data record has a single skill opens that skill's window on it [ASSUMED]
@@ -884,7 +890,7 @@ export class SkillFx {
       U.quiet = false;
     }
     for (const U of this.units.values()) {
-      if (U && U.seen !== sweep && (U.loopsOn || U.readyOn || U.passiveOn || U.energy || U.ewin)) this._releaseU(U);
+      if (U && U.seen !== sweep && (U.loopsOn || U.readyOn || U.passiveOn || U.energy || U.ewin || U.decals.length)) this._releaseU(U);
     }
     for (const [slot, t] of this.tloops) {
       const tv = t.tgt;
@@ -994,7 +1000,8 @@ export class SkillFx {
 
   /**
    * An FX_BINDINGS entry: the projectile's reached effects (or its keys) where the fx happens, held as the binding
-   * says; a binding's own `keys` at 'target' once on the unit the fx names.
+   * says; a binding's own `keys` at 'target' once on the unit the fx names. A 'point' binding with `tiles` plays one
+   * copy per tile offset (skills.js `tiles`: 黍's 十字 sowing, the fx naming the centre tile).
    */
   _bound(U, bind, x, y, extra) {
     const keys = bindingEffects(this.w.idx, bind).filter((k) => this.w.ofx.lib.has(k));
@@ -1003,24 +1010,48 @@ export class SkillFx {
       // once on the unit the fx names (泡泡's attacker), else where it happens; turned by the owner's side
       const tv = this.w.view(extra.target) || { id: 'fx:point', x, y, z: 0 };
       let drew = false;
-      for (const k of keys) if (this.w.playOn(k, tv, { flipFrom: U.v || undefined })) drew = true;
+      for (const k of keys) if (this.w.playOn(this._outfit(U, bind, k), tv, { flipFrom: U.v || undefined })) drew = true;
       return drew;
     }
     const tv = this.w.view(extra.id);
-    const at = bind.at === 'point' || !tv ? { id: 'fx:point', x, y, z: tv ? tv.z || 0 : 0 } : tv;
+    const point = bind.at === 'point' || !tv;
+    const z = tv ? tv.z || 0 : 0;
+    // the tiles of the fx's point: the binding's own offsets, else the point itself (one copy)
+    const spots = point && Array.isArray(bind.tiles) && bind.tiles.length ? bind.tiles : NO_TILES;
     const bb = U.srec?.bb || {};
     const fxS = Number(extra.duration ?? extra.dur ?? extra.hold);
-    const holdS = bind.hold === 'fx' ? (fxS > 0 ? fxS : bind.holdS || SKILL_CAST_S)
-      : Number(bb[bind.hold]) > 0 ? Number(bb[bind.hold]) : bind.holdS || SKILL_CAST_S;
+    // `hold: 'owner'` (skills.js): as long as the owner stands — the kit's own lasting state (黍's sown tiles, cleared
+    // when she leaves), not a time. The handles are the unit's (`_releaseU`), and they are no `marks`: a permanent mark
+    // would make every `during` binding of hers last forever
+    const lifetime = bind.hold === 'owner';
+    const holdS = lifetime ? Infinity
+      : bind.hold === 'fx' ? (fxS > 0 ? fxS : bind.holdS || SKILL_CAST_S)
+        : Number(bb[bind.hold]) > 0 ? Number(bb[bind.hold]) : bind.holdS || SKILL_CAST_S;
     let drew = false;
-    for (const k of keys) {
-      const h = this.w.playOn(k, at, { loop: true, important: true });
-      if (!h) continue;
-      drew = true;
-      later(this.w.ofx, holdS, () => h.stop());
-      this.marks.push({ owner: U.id, r: Math.round(y), c: Math.round(x), until: this.w.ofx.time + holdS, h, cover: bind.cover || [] });
+    for (const [dx, dy] of spots) {
+      const at = point ? { id: 'fx:point', x: x + (dx || 0), y: y + (dy || 0), z } : tv;
+      const mx = x + (dx || 0), my = y + (dy || 0);   // a unit's spot keeps the fx's point for the mark
+      for (const k of keys) {
+        const h = this.w.playOn(this._outfit(U, bind, k), at, { loop: true, important: true, decal: !!bind.decal });
+        if (!h) continue;
+        drew = true;
+        if (lifetime) { U.decals.push(h); continue; }
+        later(this.w.ofx, holdS, () => h.stop());
+        this.marks.push({ owner: U.id, r: Math.round(my), c: Math.round(mx), until: this.w.ofx.time + holdS, h, cover: bind.cover || [] });
+      }
     }
     return drew;
+  }
+
+  /**
+   * The prefab a binding plays: the one the owner's outfit plays in place of the key when the binding asks for it
+   * (`skin`: a row of the unit's own animation — 琳琅诗怀雅's throw), else the key. An outfit whose replacement the
+   * extraction does not hold, or a unit with no outfit, keeps the key (wiring.skinKey).
+   */
+  _outfit(U, bind, k) {
+    if (!bind.skin || !U.v) return k;
+    const sk = lc(this.w.skinKey(U.v, k));
+    return sk && sk !== k && this.w.ofx.lib.has(sk) ? sk : k;
   }
 
   // ---- preload ----------------------------------------------------------------------------------------------------

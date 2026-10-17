@@ -171,6 +171,8 @@ function onWelcome(msg) {
     content: msg.content && typeof msg.content.vanilla === 'string' ? { vanilla: msg.content.vanilla } : null,
     // how many unofficial plugins it has (P1a — absent: none; content.js fetches the catalogue only when there are some)
     installedPlugins: pluginCount(msg.content),
+    // 对局人数 (server/lobby.js matchStats): the hall shows 「对局 12/20 人」 before a room.state arrives (ui/serverLoad.js)
+    stats: msg.stats && typeof msg.stats === 'object' ? msg.stats : prev.stats,
   });
   welcomeAt = Date.now();
 
@@ -214,6 +216,8 @@ function onRoomState(msg) {
   identity.rememberMatch(room.inMatch && seats.some((seat) => seat?.playerId === myId)
     ? { name: store.get().me.name, code: room.code || '' } : null);
   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
+  // 对局人数: the room.state carries it (server/lobby.js matchStats) — the hall, the room and the HUD read store.stats
+  if (room.stats && typeof room.stats === 'object') store.set({ stats: room.stats });
   maybeFinishRestore();
 }
 

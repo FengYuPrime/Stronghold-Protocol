@@ -4,6 +4,10 @@
 //   * TRUST_PROXY ('auto' default: honour CF-Connecting-IP / X-Real-IP / X-Forwarded-For only from loopback/private
 //     peers such as a local cloudflared; '1' always; '0' never) → net.js trustProxy;
 //   * DEBUG → the console logger's debug level;
+//   * SP_MAX_MATCH_PLAYERS (default 20; `0` or empty = no limit) → lobby.js `maxMatchPlayers`: how many humans may be in
+//     running matches at once (a low-spec server's cap; the hall, spectating and AI seats are never counted);
+//   * SP_OWNER_TOKEN → net.js `ownerToken`: a page that carries it in its URL (`/?owner=…`) plays as the server owner —
+//     never refused by that cap and never counted against it; unset/empty = nobody has the privilege;
 //   * SP_ASSET_INDEX=0 (or the `assetIndex: false` option) → no content-hash index: plain asset URLs, size-mtime ETags
 //     (assetIndex.js); the index of the default public/ persists in .cache/asset-hashes.json;
 //   * the served directories (public/, data/, shared/, the content packs' packs/ and the plugins' plugins/ of this
@@ -20,8 +24,8 @@ export const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 
 /** startServer() options handed on to net.js Network / lobby.js Lobby (an absent one keeps that module's default). */
 const NET_OPTION_KEYS = ['reconnectWindowMs', 'heartbeatMs', 'helloTimeoutMs', 'ratePerSec', 'rateBurst', 'maxConnections', 'abuseDropsPerSec',
-  'maxConnectionsPerAddr', 'heavyPerSec', 'heavyBurst', 'trustProxy'];
-const LOBBY_OPTION_KEYS = ['lobbyGraceMs', 'maxRooms', 'maxRoomsPerAddr', 'maxMatchesPerAddr', 'resyncMinGapMs', 'soloReconnectWindowMs'];
+  'maxConnectionsPerAddr', 'heavyPerSec', 'heavyBurst', 'trustProxy', 'ownerToken'];
+const LOBBY_OPTION_KEYS = ['lobbyGraceMs', 'maxRooms', 'maxRoomsPerAddr', 'maxMatchesPerAddr', 'resyncMinGapMs', 'soloReconnectWindowMs', 'maxMatchPlayers'];
 
 /**
  * Bind address used when neither the `host` option nor `HOST` says otherwise: one dual-stack socket, so the server
@@ -98,6 +102,8 @@ export function netOptionsFrom(opts) {
     if (opts[k] != null) netOptions[k] = opts[k];
   }
   if (netOptions.trustProxy == null) netOptions.trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+  // 服主密钥 (SP_OWNER_TOKEN): the privilege token a page may carry in its URL (`/?owner=…`); null = the feature is off
+  if (netOptions.ownerToken == null) netOptions.ownerToken = ownerToken();
   return netOptions;
 }
 
@@ -110,7 +116,44 @@ export function lobbyOptionsFrom(opts) {
   // 调试开关 (devGold): 起服时 SP_DEV=1 打开，客户端会多出一个「+999 资金」按钮（server/match/player/economy.js
   // devGold）。只在这里读一次环境变量，按对局带过去，所以线上/普通启动里这条命令根本不存在。
   lobbyOptions.devGold = opts.devGold != null ? !!opts.devGold : isDev();
+  // 对局人数上限 (SP_MAX_MATCH_PLAYERS): 低配服务器限制同时在「对局中」的真人玩家数；0 = 不限制
+  if (lobbyOptions.maxMatchPlayers == null) lobbyOptions.maxMatchPlayers = maxMatchPlayers();
   return lobbyOptions;
+}
+
+/** The default cap on humans in running matches: LOBBY_DEFAULTS.maxMatchPlayers (server/lobby.js). */
+export const DEFAULT_MAX_MATCH_PLAYERS = 20;
+
+/**
+ * How many humans may be in running matches at once (env `SP_MAX_MATCH_PLAYERS`; server/lobby.js Lobby.start):
+ *   * unset → the default (20);
+ *   * an empty value, `0` or a value < 1 → 0, i.e. no limit (a small server that wants no cap says so);
+ *   * any other number → that number (floored; a negative/unparsable value keeps the default — a typo never removes
+ *     the cap silently, which is the whole point of setting it on a low-spec machine).
+ * The hall is unaffected: waiting, browsing and spectating never count against it.
+ * @returns {number} 0 = unlimited
+ */
+export function maxMatchPlayers() {
+  const raw = process.env.SP_MAX_MATCH_PLAYERS;
+  if (raw == null) return DEFAULT_MAX_MATCH_PLAYERS;
+  const s = String(raw).trim();
+  if (s === '') return 0;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_MATCH_PLAYERS;
+  const cap = Math.floor(n);
+  return cap > 0 ? cap : 0;
+}
+
+/**
+ * The server owner's privilege key (env `SP_OWNER_TOKEN`), or null when the feature is off. A page that presents it in
+ * its URL (`/?owner=<key>`) gets its session marked as the owner's (server/net.js onHelloMsg): its seats are never
+ * refused by the match-player limit and never count against it (server/lobby.js Lobby.start). The key is never
+ * logged, never sent to a client and never part of /healthz — an empty value means off, like an unset one.
+ * @returns {string | null}
+ */
+export function ownerToken() {
+  const s = String(process.env.SP_OWNER_TOKEN ?? '').trim();
+  return s ? s : null;
 }
 
 /** 是否开启了开发调试（SP_DEV=1 / true / on）；也接受命令行 --dev（tools/setup.mjs、npm run dev 用得上）。 */

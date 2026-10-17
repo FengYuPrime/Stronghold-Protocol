@@ -1,6 +1,6 @@
-// 「战后统计」插件（plugins/match-charts）的纯逻辑：每回合存档、一人一条线的序列、以及 ECharts 的 option。
+// 「战后统计」插件（plugins/match-charts）的纯逻辑：每回合存档、某一回合的占比切片、以及 ECharts 的饼图 option。
 //
-// 这些函数不碰 DOM / store / runner：输入是「该回合每个干员的累计值」，输出是要画的线与要落盘的档案，所以能直接单测。
+// 这些函数不碰 DOM / store / runner：输入是「该回合每个干员的累计值」，输出是要画的扇区与要落盘的档案，所以能直接单测。
 // 与 plugins/dps-meter 的纯逻辑测试（test/plugins/dps-meter.test.js）分开，两个插件各自独立。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import {
   LATEST_KEY, LOG_KEY, LEGACY_LOG_KEY, serializeLatest, readLatest, withLiveRound,
-  roundSeries, matchLog, readLog, saveMatch, readMatch, newestMatch, unitSeries,
+  roundSeries, matchLog, readLog, saveMatch, readMatch, roundPie,
 } from '../../plugins/match-charts/charts-core.js';
 
 const ROOT = path.join(import.meta.dirname, '..', '..');
@@ -77,36 +77,50 @@ test('存档用插件自己的键，但读得到拆分之前留下的旧档（�
   mem.set(LEGACY_LOG_KEY, JSON.stringify(legacy));
   assert.equal(readMatch('r1.old', storage)?.total?.dmg, undefined, '旧档没有 total，但能拿到回合');
   assert.equal(readMatch('r1.old', storage).rounds.length, 1);
-  assert.equal(newestMatch(storage).id, 'r1.old');
-  // 新键一出现就优先用它
+  // 新键一出现就优先用它；第一次 saveMatch 会把旧键里的档一起搬进新键（老纪录不会丢）
   saveMatch('r1.new', matchLog([{ round: 3, time: 10, dmg: 700, heal: 0, rows: [{ key: 'b', name: 'B', dmg: 700 }] }]), storage);
-  assert.equal(newestMatch(storage).id, 'r1.new', '新键里有更新的那局');
+  assert.equal(readMatch('r1.new', storage).total.dmg, 700, '新键里有更新的那局');
+  assert.equal(readMatch('r1.old', storage).rounds.length, 1, '旧档被搬进新键后仍然读得到');
   assert.deepEqual(Object.keys(readLog(storage)).sort(), ['r1.new', 'r1.old']);
 });
 
-test('图表数据 unitSeries：一人一条线，横轴回合、竖轴总量，缺回合记 0', () => {
+test('饼图数据 roundPie：只看下拉框选中的那一回合，按占比从大到小，0 的不占扇区', () => {
   const entry = {
     rounds: [
       { n: 1, units: [{ key: 'a', name: 'A', dmg: 100, heal: 0 }, { key: 'b', name: 'B', dmg: 300, heal: 50 }] },
-      { n: 2, units: [{ key: 'a', name: 'A', dmg: 500, heal: 10 }] },                    // B 这回合没上场
-      { n: 3, units: [{ key: 'b', name: 'B', dmg: 100, heal: 80 }, { key: 'a', name: 'A', dmg: 400, heal: 0 }] },
+      { n: 2, units: [{ key: 'a', name: 'A', dmg: 500, heal: 10 }] },
+      { n: 3, units: [{ key: 'b', name: 'B', dmg: 100, heal: 80 }, { key: 'a', name: 'A', dmg: 400, heal: 0 },
+        { key: 'c', name: 'C', dmg: 0, heal: 0 }] },          // 没出手的单位不占扇区
     ],
   };
-  const dmg = unitSeries(entry);
-  assert.deepEqual(dmg.rounds, [1, 2, 3], '横轴＝游戏回合号');
-  assert.deepEqual(dmg.series.map((s) => s.name), ['A', 'B'], '按总量从大到小（A 1000 > B 400）');
-  assert.deepEqual(dmg.series[0].points, [100, 500, 400]);
-  assert.deepEqual(dmg.series[1].points, [300, 0, 100], '缺的回合记 0，回合数仍对齐');
-  assert.equal(dmg.series[0].total, 1000);
-  // 竖轴口径可切治疗
-  const heal = unitSeries(entry, 'heal');
-  assert.deepEqual(heal.series.map((s) => [s.name, s.total]), [['B', 130], ['A', 10]]);
-  assert.deepEqual(heal.series[0].points, [50, 0, 80]);
-  // 同一名干员的精锐形态算另一条线；脏数据不炸
-  const g = unitSeries({ rounds: [{ n: 1, units: [{ key: 'a|g', name: 'A+', dmg: 10, golden: true }] }] });
-  assert.equal(g.series.length, 1);
-  assert.deepEqual(unitSeries({}).series, []);
-  assert.deepEqual(unitSeries(null).rounds, []);
+  const p1 = roundPie(entry, 0);
+  assert.equal(p1.round, 1, '选中第 1 回合就只看第 1 回合');
+  assert.equal(p1.total, 400);
+  assert.deepEqual(p1.slices.map((s) => [s.name, s.value, s.pct]), [['B', 300, 75], ['A', 100, 25]], '饼图＝占比，从大到小');
+  // 默认 = 最后一回合（rounds.length - 1）
+  const last = roundPie(entry);
+  assert.equal(last.index, 2);
+  assert.equal(last.round, 3, '不传下标时默认最后一回合');
+  assert.deepEqual(last.slices.map((s) => s.name), ['A', 'B'], '0 伤害的 C 不进饼图');
+  assert.equal(last.total, 500);
+  assert.deepEqual(last.slices.map((s) => s.pct), [80, 20]);
+  assert.equal(last.slices[0].name, 'A');
+  // 越界退回最后一回合；治疗口径另算
+  assert.equal(roundPie(entry, 99).round, 3);
+  assert.equal(roundPie(entry, -5).round, 3);
+  assert.equal(roundPie(entry, 1.5).round, 3, '非整数下标也算越界');
+  const heal = roundPie(entry, 0, 'heal');
+  assert.deepEqual(heal.slices.map((s) => [s.name, s.value, s.pct]), [['B', 50, 100]]);
+  assert.equal(heal.total, 50);
+  // 没有这一局 / 这一回合没数据：空切片（界面据此显示空状态，不回退到任何别的对局）
+  assert.deepEqual(roundPie(null), { index: -1, round: null, total: 0, slices: [] });
+  assert.deepEqual(roundPie({ rounds: [] }).slices, []);
+  assert.deepEqual(roundPie({ rounds: [{ n: 2, units: [{ key: 'x', name: 'X', dmg: 0, heal: 0 }] }] }).slices, []);
+  // 缺 n 时用下标 + 1；没名字时退回 defId / 占位符（脏数据不炸）
+  assert.equal(roundPie({ rounds: [{ units: [{ key: 'q', name: 'Q', dmg: 3 }] }] }).round, 1);
+  const noName = roundPie({ rounds: [{ n: 2, units: [{ key: 'q', dmg: 5 }] }] }, 0);
+  assert.equal(noName.slices[0].name, '—');
+  assert.equal(noName.slices[0].key, 'q');
 });
 
 test('端到端：本局副本 → 结算存档 → 图表要有数据（明细不能丢）', () => {
@@ -130,12 +144,11 @@ test('端到端：本局副本 → 结算存档 → 图表要有数据（明细�
     '每回合都要带上干员明细（第二回合那个 0/0 的干员不进图，所以是 1 条）');
   assert.equal(entry.rounds[1].units[0].name, 'B');
   assert.equal(entry.rounds[1].units[0].dmg, 2000);
-  // ③ 图表：一人一条线，两条线各有各的点
-  const { rounds, series } = unitSeries(entry);
-  assert.deepEqual(rounds, [1, 2]);
-  assert.deepEqual(series.map((s) => [s.name, s.total]), [['B', 2000], ['A', 1000]]);
-  assert.deepEqual(series.find((s) => s.name === 'A').points, [1000, 0], 'A 第二回合没输出');
-  assert.deepEqual(series.find((s) => s.name === 'B').points, [0, 2000]);
+  // ③ 图表：下拉框选回合 → 该回合的占比饼图（默认最后回合）
+  assert.deepEqual(roundPie(entry, 0).slices.map((s) => [s.name, s.value]), [['A', 1000]]);
+  const lastRound = roundPie(entry);
+  assert.equal(lastRound.round, 2, '默认最后一回合');
+  assert.deepEqual(lastRound.slices.map((s) => [s.name, s.value, s.pct]), [['B', 2000, 100]], 'A 第二回合没输出，不占扇区');
   // ④ 副本里不该有的字段不落盘（体积），坏数据也不抛
   assert.ok(!('dps' in readLatest(storage)[0].rows[0]), '只存图表要用的字段');
   assert.deepEqual(readLatest({ getItem: () => '{oops' }), []);
@@ -150,10 +163,12 @@ test('结算比回合收尾早：用实时快照补上最后一回合（少了�
   assert.deepEqual(merged.map((r) => r.round), [2, 1], '进行中的这一回合排在最前');
   assert.equal(merged[0].dmg, 1000, '合计 = 800 + 200');
   assert.equal(merged[0].heal, 50);
-  // 存档 → 图表能出两个回合、两条线
+  // 存档 → 两个回合各画一张饼（最后一回合默认选中）
   const entry = matchLog(merged);
   assert.deepEqual(entry.rounds.map((r) => r.n), [1, 2]);
-  assert.deepEqual(unitSeries(entry).series.map((s) => [s.name, s.total]), [['A', 1800], ['B', 200]]);
+  assert.deepEqual(roundPie(entry, 0).slices.map((s) => [s.name, s.value]), [['A', 1000]]);
+  assert.deepEqual(roundPie(entry, 1).slices.map((s) => [s.name, s.value, s.pct]), [['A', 800, 80], ['B', 200, 20]]);
+  assert.equal(roundPie(entry).round, 2, '默认选中最后一回合');
   // 同一回合已经收尾过就不重复加
   assert.equal(withLiveRound(merged, live).length, 2);
   // 一局只有实时快照（很短的局 / 前面什么都没收尾）：也要能出图
@@ -166,27 +181,19 @@ test('结算比回合收尾早：用实时快照补上最后一回合（少了�
   assert.deepEqual(withLiveRound(null, live).length, 1);
 });
 
-test('编号对不上时兜底用「最近存档的一局」（结算页上就是刚打完那局）', () => {
+test('只按 record.id 取档：编号对不上就是没数据（不再退回「最近存档的一局」）', () => {
   const mem = new Map();
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, v) };
-  assert.equal(newestMatch(storage), null, '空表');
   saveMatch('r1.old', matchLog([{ round: 1, time: 10, dmg: 100, heal: 0, rows: [{ key: 'a', name: 'A', dmg: 100 }] }]), storage);
-  const older = readMatch('r1.old', storage);
-  // 手工把时间拉开，保证「最近」是确定的
-  older.at = 1000;
-  saveMatch('r1.old', older, storage);
-  assert.equal(newestMatch(storage).id, 'r1.old');
   saveMatch('r1.new', matchLog([{ round: 4, time: 20, dmg: 500, heal: 0, rows: [{ key: 'b', name: 'B', dmg: 500 }] }]), storage);
-  const newer = readMatch('r1.new', storage);
-  newer.at = 2000;
-  saveMatch('r1.new', newer, storage);
-  assert.equal(newestMatch(storage).id, 'r1.new', '按 at 取最近的');
-  assert.equal(newestMatch(storage).entry.rounds.length, 1);
-  // 没有回合的残档不算数
-  saveMatch('r1.empty', { v: 2, at: 9999, rounds: [] }, storage);
-  assert.equal(newestMatch(storage).id, 'r1.new');
-  assert.equal(readMatch('r1.missing', storage), null);
+  // 有别的对局的档，但这一局没存过：readMatch 必须返回 null（界面据此显示空状态）
+  assert.equal(readMatch('r1.missing', storage), null, '别的对局有档也不能拿来顶替');
   assert.equal(readMatch(null, storage), null);
+  assert.equal(readMatch('', storage), null);
+  assert.equal(readMatch('r1.old', storage).rounds.length, 1);
+  // 没有回合的残档同样算「没数据」
+  saveMatch('r1.empty', { v: 2, at: 9999, rounds: [] }, storage);
+  assert.equal(readMatch('r1.empty', storage), null);
 });
 
 test('两个插件共有的纯函数不能各改各的（复制粘贴的防漂移）', () => {

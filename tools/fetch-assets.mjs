@@ -67,7 +67,7 @@ import { MirrorPolicy, selectDownloadSource, validateSource } from './assets/net
 import { normalizeProxyPrefix } from './assets/sources.mjs';
 import { loadIndexes } from './assets/cache.mjs';
 import { indexAudio, VOICE_DIRS } from './assets/audio.mjs';
-import { buildPlan, VOICE_OPTIONAL_TREES } from './assets/plan.mjs';
+import { buildPlan, variantModelFiles, VOICE_OPTIONAL_TREES } from './assets/plan.mjs';
 import {
   processModels, findLocalEnemyModels, findLocalTokenModels, localSpineMeta, loadLocalSpines, LOCAL_ENEMY_SPINES_FILE,
   LOCAL_TOKEN_SPINES_FILE, LOCAL_ENEMY_SPINE_DIR, LOCAL_TOKEN_SPINE_DIR,
@@ -306,7 +306,7 @@ async function listFiles(dir, base = dir, out = []) {
 /** Remove fields that only make sense next to a resolved spine. */
 function tidyManifest(m) {
   for (const e of Object.values(m.enemies || {})) if (!e.spine) delete e.spineAliasOf;
-  for (const t of Object.values(m.tokens || {})) if (!t.spine) delete t.spineVariant;
+  for (const t of Object.values(m.tokens || {})) if (!t.spine) { delete t.spineVariant; delete t.spineVariants; }
   if (m.skillsById) {
     for (const [sid, iconId] of Object.entries(m.skillsById)) if (!m.skills?.[iconId]) delete m.skillsById[sid];
   }
@@ -415,6 +415,10 @@ async function main() {
     readJson('docs/research/05-enemies.json'),
     readJson('docs/research/05-maps.json'),
   ]);
+  // The official skin table (`charSkins[*].tokenSkinMap`, the summon outfits): the plan derives one Spine model per
+  // (tokenId, tokenSkinId) pair from it. Cached by tools/skins.mjs loadSkinTable; absent on a checkout that never ran
+  // skins, where the plan falls back to research 07's partial `battleSpineSkinVariantsOnly`.
+  const skinTable = await readJson('.cache/skin-table.json').catch(() => null);
   const proxyPrefix = resolveProxyPrefix(opts.source, opts.offline);
   const verifier = opts.sourceSnapshot ? new SourceVerifier(JSON.parse(await readFile(opts.sourceSnapshot, 'utf8'))) : undefined;
   const source = await selectDownloadSource({ mode: opts.source, offline: opts.offline, proxyPrefix, log, verified: !!verifier });
@@ -442,6 +446,7 @@ async function main() {
     extraHandbook,
     localEnemySpines,
     localTokenSpines,
+    skinTable,
     extraOperators: extras.extraOperators,
     moduleTypes: extras.moduleTypes,
     statsTemplate,
@@ -495,6 +500,10 @@ async function main() {
     root: ASSETS, dl, cachePath: join(CACHE, 'spine-info.json'), download: !opts.offline, log,
     ...(opts.addOnly ? { writable: (rel) => dl.written.has(rel) } : null),
   });
+  // A summon (token) folder holds one model per outfit, but the manifest references only the token's own model: the
+  // files of the other skin variants are on disk without an entry, so keep them from the orphan sweep (with --prune
+  // they would be deleted after a successful download — plan.mjs variantModelFiles).
+  for (const rel of variantModelFiles(plan.models)) dl.preserved.add(rel);
 
   // Manifest
   const resolved = resolveTemplate(plan.template, {

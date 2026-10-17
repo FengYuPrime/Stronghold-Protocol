@@ -95,7 +95,7 @@ export function compileEffect(desc, lib = {}) {
     ps: new Array(n).fill(null), psr: new Array(n).fill(null), mesh: new Array(n).fill(null), skinned: new Array(n).fill(null),
     trail: new Array(n).fill(null), line: new Array(n).fill(null), subNodes: new Set(), hasPsAncestor: new Uint8Array(n),
     clips: (Array.isArray(desc?.clips) ? desc.clips : []).map(compileClip), animators: [],
-    pe: null, proj: null, fxDelay: new Map(), tweeners: [], uvRot: [], lod: null, follow: null, direction: null,
+    pe: null, peNode: -1, proj: null, fxDelay: new Map(), tweeners: [], uvRot: [], lod: null, follow: null, direction: null,
     onPlay: [], onFinish: [], switchable: null, colorMod: null, pause: null, pauses: [], materials: [], lite: [],
     textures: Array.isArray(desc?.textures) ? desc.textures : [], meshes: Array.isArray(desc?.meshes) ? desc.meshes : [],
     stats: desc?.stats || {}, refs: Array.isArray(desc?.refs) ? desc.refs : [],
@@ -142,7 +142,9 @@ export function compileEffect(desc, lib = {}) {
       if (!b || b.enabled === false) continue;
       const f = isObj(b.fields) ? b.fields : {};
       switch (b.class) {
-        case 'ParticleEffect': case 'EmptyEffect': if (!def.pe && i === 0) def.pe = f; else if (!def.pe) def.pe = f; break;
+        // the first of them is the effect itself (the root's `ParticleEffect` when it has one); `peNode` remembers which
+        // node it was — the root at a spawn point drops its authored offset (§33.11 `rootAtPoint`)
+        case 'ParticleEffect': case 'EmptyEffect': if (!def.pe) { def.pe = f; def.peNode = i; } break;
         case 'ProjectileEffect': def.proj = f; break;
         case 'FxDelay': def.fxDelay.set(i, Math.max(0, num(f._delayTime, 0))); break;
         case 'FxUVTweener': case 'FxUVTweenerAdvance':
@@ -203,6 +205,15 @@ export function compileEffect(desc, lib = {}) {
   def.maxLifetime = num(pe._maxLifetime, -1);
   def.isLoop = on(pe._isLoop);
   def.spawn = num(def.pe?._spawnLocation, 0) | 0;
+  // The root transform IS the effect's placement: the client sets it to the `_spawnLocation` point
+  // (`Effect._InitLocationFromEntity`), so a prefab whose root is the ParticleEffect and that declares a point
+  // (non-zero: 0 is NONE) is drawn at that point, not at point + the offset it was authored at. The extraction keeps
+  // the editor's layout offsets — 黍's talent ring `shu_talent_buff_01` at [-1.94, -1, 0] (2.2 tiles off her feet; the
+  // prefab has no offset on the control group `shu_skill_03_range` / `shu_birth_01`), ranges laid out in a row
+  // (`enemy_nhpbr_attack_range` z 10, `ya_skill3_range_*` x 2…6, `buff_poison_1/2` ±2.04). Left alone: the 253 of the
+  // 325 root-offset prefabs with no ParticleEffect at all (projectile / trail-only ones, placed by their flight) and
+  // the ones with `_spawnLocation` NONE, which the client does not place by a point.
+  def.rootAtPoint = def.peNode === 0 && def.spawn !== 0;
   // ParticleEffect `_holdByOwner`: its owner holds it — the effect moves with the unit (render/vfx/wiring.js playOn)
   def.holdByOwner = on(def.pe?._holdByOwner);
   def.rotateType = num(def.pe?._rotateType, 0) | 0;
@@ -564,6 +575,10 @@ export class Effect {
     for (let i = 0; i < n; i++) {
       const o = i * 10;
       _p3[0] = L[o]; _p3[1] = L[o + 1]; _p3[2] = L[o + 2];
+      // the root sits at its anchor (below): the offset its prefab was authored at is the editor's layout, which the
+      // client overwrites with the spawn point (§33.11 `rootAtPoint`). Only the authored pose is dropped — what a clip
+      // animates on top of it is kept.
+      if (i === 0 && def.rootAtPoint) { _p3[0] -= def.base[o]; _p3[1] -= def.base[o + 1]; _p3[2] -= def.base[o + 2]; }
       _q[0] = L[o + 3]; _q[1] = L[o + 4]; _q[2] = L[o + 5]; _q[3] = L[o + 6];
       _s3[0] = L[o + 7]; _s3[1] = L[o + 8]; _s3[2] = L[o + 9];
       // the direction: a `_rotationZ` helper's rotation is set to it (the client's script replaces the helper's

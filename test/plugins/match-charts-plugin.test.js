@@ -69,7 +69,18 @@ test('连打两把：第二把必须按新的 record 建档，不能停在第一
   const second = core.readMatch('r1.second');
   assert.ok(second, '第二把也要建档（这就是「图表没更新」的根因：这一条没写进去）');
   assert.equal(second.total.dmg, 7777, '第二把的数值必须是第二把的');
-  assert.equal(core.newestMatch()?.id, 'r1.second', '「最近一局」要指向第二把');
+  // ---- 弹窗取数：只认 record.id，取不到就是空状态（不再退回「最近存档的一局」）----
+  const chart = await loadModule(PLUGIN, 'chart', DEPS);
+  const got = chart.resolveMatch('r1.second');
+  assert.equal(got.id, 'r1.second');
+  assert.ok(got.entry, '按编号取到第二把的存档');
+  assert.equal('fellBack' in got, false, '没有兜底标记了（上一局回退已删）');
+  assert.equal(chart.resolveMatch('r1.missing').entry, null, '编号对不上 → 没数据，绝不拿第一把顶替');
+  assert.equal(chart.resolveMatch(null).entry, null);
+  // 默认选中「这一局的最后一回合」
+  const pie = core.roundPie(got.entry);
+  assert.equal(pie.index, got.entry.rounds.length - 1, '默认 = rounds.length - 1');
+  assert.ok(pie.slices.length > 0, '最后一回合的饼图有扇区');
   handle.dispose();
 });
 
@@ -156,41 +167,49 @@ test('结算页的按钮只会插一次（曾经每帧插一个，形成按钮�
   assert.deepEqual(chart.headingsNeedingButton(null), []);
 });
 
-test('ECharts 的 option：轴触发提示（含回合标题与色点）、图例带总量、一人一条线', async () => {
+test('ECharts 的 option：饼图（item 触发提示、图例带占比、扇区按占比），不是折线', async () => {
   stubDom();
   const core = await loadModule(PLUGIN, 'charts-core', DEPS);
-  const series = [
-    { key: 'a', name: 'A', total: 1900, points: [1000, 900] },
-    { key: 'b', name: 'B', total: 500, points: [200, 300] },
+  const slices = [
+    { key: 'a', name: 'A', value: 15000, pct: 75 },
+    { key: 'b', name: 'B', value: 5000, pct: 25 },
   ];
   const t = (s, p) => (p && p.n != null ? `第 ${p.n} 回合` : s);
-  const opt = core.echartsOption({ series, rounds: [3, 4], axisName: '总伤', totals: { A: 1900, B: 50000 }, t });
-  assert.equal(opt.tooltip.trigger, 'axis', '参考图那种跟随鼠标的提示框');
-  assert.equal(opt.tooltip.order, 'valueDesc', '数值从大到小排');
-  const tip = opt.tooltip.formatter([
-    { axisValue: '4', seriesName: 'A', value: 900, color: '#d9480f' },
-    { axisValue: '4', seriesName: 'B', value: 300, color: '#0b7285' },
-  ]);
+  const opt = core.pieOption({ slices, round: 4, axisName: '总伤', t });
+  // 一张饼 = 一回合，type 必须是 pie（需求方从折线改成饼图）
+  assert.equal(opt.series.length, 1);
+  assert.equal(opt.series[0].type, 'pie');
+  assert.deepEqual(opt.series[0].data, [{ name: 'A', value: 15000 }, { name: 'B', value: 5000 }]);
+  assert.equal(opt.series[0].name, '总伤', 'series 名跟口径走');
+  assert.equal(core.pieOption({ slices, round: 1, t }).series[0].name, '占比', '没给口径时用「占比」');
+  // 提示框：item 触发，一条扇区的信息（单位 / 数值 / 占比），标题是回合号
+  assert.equal(opt.tooltip.trigger, 'item');
+  const tip = opt.tooltip.formatter({ name: 'A', value: 15000, percent: 75, color: '#d9480f' });
   assert.match(tip, /第 4 回合/, '提示框标题是回合号');
-  assert.match(tip, /#d9480f/, '带该线的颜色，便于对号入座');
+  assert.match(tip, /A/, '单位名');
+  assert.match(tip, /15,000/, '五位数起加千分位');
+  assert.match(tip, /75%/, '占比');
+  assert.match(tip, /#d9480f/, '带该扇区的颜色，便于对号入座');
+  assert.equal(opt.tooltip.formatter(), '', '脏数据不炸');
   assert.equal(opt.tooltip.formatter([]), '');
-  // 图例：ECharts 自带点击隐藏 / 显示，文字后补上这一局的总量
+  // 扇区标签直接写「单位 占比」；图例是可滚动的、带占比
+  assert.equal(opt.series[0].label.formatter({ name: 'B', percent: 25 }), 'B 25%');
+  assert.equal(opt.legend.type, 'scroll', '单位多时图例可滚动');
   assert.equal(typeof opt.legend.formatter, 'function');
-  assert.equal(opt.legend.formatter('A'), 'A  1900', '四位数不加分隔符');
-  assert.equal(opt.legend.formatter('B'), 'B  50,000', '五位数起加千分位');
-  assert.equal(opt.legend.type, 'scroll', '干员多时图例可滚动');
-  // 一人一条线 + 横轴是回合
-  assert.deepEqual(opt.series.map((s) => [s.name, s.type]), [['A', 'line'], ['B', 'line']]);
-  assert.deepEqual(opt.series[0].data, [1000, 900]);
-  assert.deepEqual(opt.xAxis.data, ['3', '4']);
-  assert.equal(opt.yAxis.name, '总伤');
-  // 颜色按顺序取自调色板（隐藏别的线不会换色）
+  assert.equal(opt.legend.formatter('A'), 'A  75%');
+  assert.equal(opt.legend.formatter('B'), 'B  25%');
+  assert.equal(opt.legend.formatter('看不见的'), '看不见的  0%');
+  // 颜色按顺序取自调色板（隐藏别的扇区不会换色）
   assert.deepEqual(opt.color, [core.colorAt(0), core.colorAt(1)]);
-  assert.deepEqual(opt.series.map((s) => s.itemStyle.color), [core.colorAt(0), core.colorAt(1)]);
   assert.equal(core.colorAt(core.LINE_COLORS.length), core.colorAt(0), '超出调色板则循环');
-  // 脏数据不炸
-  assert.deepEqual(core.echartsOption({}).series, []);
-  assert.deepEqual(core.echartsOption({ series: null, rounds: null }).xAxis.data, []);
+  // 百分比文案：一位小数，整数不带 .0
+  assert.equal(core.fmtPct(75), '75%');
+  assert.equal(core.fmtPct(33.333), '33.3%');
+  assert.equal(core.fmtPct(NaN), '0%');
+  // 脏数据不炸；空切片就是一空数组（界面此时显示空状态，不画图）
+  assert.deepEqual(core.pieOption({}).series[0].data, []);
+  assert.deepEqual(core.pieOption({ slices: null }).series[0].data, []);
+  assert.deepEqual(core.pieOption({ slices: [] }).color, []);
 });
 
 test('ECharts 用动态 import 取（没装时插件其余部分照常），dispose / resize 都挂好', async () => {
@@ -236,17 +255,23 @@ test('自带 i18n 覆盖界面用到的每一条文案', async () => {
   assert.ok(files.length >= 4, '至少随包带四种语言');
   for (const f of files) {
     const dict = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-    for (const id of ['战斗统计', '每回合战斗统计', '总伤', '总治疗', '关闭', '查看每回合各干员的输出曲线']) {
+    for (const id of ['战斗统计', '每回合战斗统计', '总伤', '总治疗', '关闭', '选择回合', '没有这场战斗的数据',
+      '查看每回合各单位的伤害占比', '第 {n} 回合', '占比']) {
       assert.equal(typeof dict[id], 'string', `${f}: ${id}`);
     }
   }
-  // 源码里 t('…') / api.t('…') 用到的每一条都要在包里；系列名是动态传进 t() 的，显式列上
-  const srcs = ['plugin.js', 'chart.js'].map(src).join('\n');
+  // 源码里 t('…') / api.t('…') 用到的每一条都要在包里；charts-core 里的饼图文案也显式列上
+  const srcs = ['plugin.js', 'chart.js', 'charts-core.js'].map(src).join('\n');
   const ids = new Set([...srcs.matchAll(/(?:api\.t|\bt)\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]));
-  for (const id of ['每回合治疗量', '每回合伤害量']) ids.add(id);
+  for (const id of ['第 {n} 回合', '占比', '该回合各单位的{v}占比；鼠标移到扇区可看数值']) ids.add(id);
   assert.ok(ids.size > 0);
   for (const f of files) {
     const dict = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
     for (const id of ids) assert.equal(typeof dict[id], 'string', `${f} 缺 "${id}"`);
+  }
+  // 四包的键必须完全一致（缺一条就会在那种语言下露出中文原文）
+  const packs = files.map((f) => [f, Object.keys(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))).sort()]);
+  for (const [f, keys] of packs.slice(1)) {
+    assert.deepEqual(keys, packs[0][1], `${f} 的键要和 ${packs[0][0]} 完全一致`);
   }
 });

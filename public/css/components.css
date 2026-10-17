@@ -1143,3 +1143,16 @@
 .plugin-settings__row { display: flex; gap: .1rem; align-items: center; justify-content: space-between; }
 .plugin-settings input, .plugin-settings select { color: var(--text-hi); background: var(--bg-2); border: 1px solid var(--line-2); padding: .03rem .06rem; max-width: 2rem; }
 .plugin-settings input[aria-invalid="true"] { border-color: var(--orange); }
+
+/* 对局人数 (public/js/ui/serverLoad.js): 「对局 12/20 人」 — the hall's top bar, a room's top bar, the match HUD.
+   Amber once the cap is reached (a start is then refused: ERR.SERVER_FULL 「服务器对局已满，请稍后再试」). */
+.server-load {
+  display: inline-flex; align-items: center; gap: .05rem; height: .26rem; padding: 0 .1rem;
+  border: 1px solid var(--line-2, var(--line)); background: var(--bg-glass); color: var(--text-lo);
+  font-size: calc(.13 * var(--t)); letter-spacing: .04em; white-space: nowrap; user-select: none;
+}
+.server-load__dot { flex: none; width: .05rem; height: .05rem; border-radius: 50%; background: currentColor; opacity: .8; }
+.server-load__text { font-family: var(--font-num); letter-spacing: .06em; }
+.server-load--full { border-color: var(--amber); color: var(--amber); }
+.server-load.gtop__load { height: .2rem; padding: 0 .06rem; font-size: calc(.11 * var(--t)); }
+

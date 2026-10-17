@@ -1,7 +1,7 @@
 // 战斗统计插件的纯逻辑与本地存档（plugins/dps-meter，见 plugins/README.md）。
 //
-// 这里只做三件事：取样/聚合（给悬浮窗用，纯函数、可单测）、每回合的折线序列、以及对局级别的本地存档
-// （`sp.dpsMeter.log`，按「对局记录」的 record.id 存，供 screens/stats.js 那栏画图）。
+// 这里只做三件事：取样/聚合（给悬浮窗用，纯函数、可单测）、每回合的序列与占比切片、以及对局级别的本地存档
+// （`sp.charts.log`，按「对局记录」的 record.id 存，供结算页的饼图读）。
 // 不碰 DOM、不碰网络：删掉插件就等于没有这段数据，核心代码一行都不依赖它。
 
 /** 取样间隔（毫秒）；40 帧 = 10 秒窗口。 */
@@ -175,39 +175,43 @@ export function unitKey(u) {
 }
 
 /**
- * 「对局记录」那张折线图的数据：**一人一条线**，横轴回合、竖轴该干员该回合的总量。
+ * 某一回合各单位的占比切片（饼图数据，纯函数、可单测）。
  *
- * 说明：竖轴用**总伤**（不是 DPS）——需求方指定；要治疗就传 `metric: 'heal'`。
- * 某回合该干员没上场/没出手时记 0（线上落在 0 而不是断开，回合数仍然对齐）。
+ * 弹窗里用下拉框选回合，选中哪一回合就**只看那一回合**：饼图 = 该回合各单位的伤害（或治疗）占比，
+ * 不再是一人一条折线。没出手的单位不占扇区（否则图例里一堆 0% 的条目）。
+ *
+ * 索引越界（含弹窗刚开、`rounds` 为空）时退回**最后一回合**；`rounds` 为空时返回空切片 ——
+ * 界面据此显示空状态，**不会**去拿别的对局的数据来填。
  * @param {{ rounds?: { n?: number, units?: { key?: string, name?: string, defId?: string, golden?: boolean, dmg?: number, heal?: number }[] }[] }} entry
+ * @param {number} [index] 回合下标（0 起）
  * @param {'dmg'|'heal'} [metric]
- * @returns {{ rounds: number[], series: { key: string, name: string, defId: string, total: number, points: number[] }[] }}
+ * @returns {{ index: number, round: number|null, total: number, slices: { key: string, name: string, defId: string|null, value: number, pct: number }[] }}
  */
-export function unitSeries(entry, metric = 'dmg') {
+export function roundPie(entry, index = -1, metric = 'dmg') {
   const field = metric === 'heal' ? 'heal' : 'dmg';
   const rounds = Array.isArray(entry && entry.rounds) ? entry.rounds : [];
-  const roundNums = rounds.map((r, i) => (Number.isFinite(r && r.n) ? Math.trunc(r.n) : i + 1));
-  const byKey = new Map();
-  rounds.forEach((r, i) => {
-    for (const u of Array.isArray(r && r.units) ? r.units : []) {
-      if (!u) continue;
-      const k = u.key || unitKey(u);
-      let s = byKey.get(k);
-      if (!s) {
-        s = { key: k, name: u.name || u.defId || k, defId: u.defId || null, total: 0, points: rounds.map(() => 0) };
-        byKey.set(k, s);
-      }
-      const v = Math.max(0, Number(u[field]) || 0);
-      s.points[i] = v;
-      s.total += v;
-    }
-  });
-  const series = [...byKey.values()].sort((a, b) => b.total - a.total || String(a.name).localeCompare(String(b.name)));
-  return { rounds: roundNums, series };
+  const last = rounds.length - 1;
+  // 默认（或越界）= 最后一回合：需求方指定「默认显示当前收录这场战斗的最后一回合」
+  const i = Number.isInteger(index) && index >= 0 && index <= last ? index : last;
+  const round = i >= 0 ? rounds[i] : null;
+  const slices = [];
+  for (const u of Array.isArray(round && round.units) ? round.units : []) {
+    if (!u) continue;
+    const value = Math.max(0, Number(u[field]) || 0);
+    if (!value) continue;                                   // 0 伤害 / 0 治疗不占扇区
+    slices.push({ key: u.key || unitKey(u), name: u.name || u.defId || '—', defId: u.defId || null, value });
+  }
+  slices.sort((a, b) => b.value - a.value || String(a.name).localeCompare(String(b.name)));
+  let total = 0;
+  for (const s of slices) total += s.value;
+  // 占比在数据层就算好（一位小数）：界面与提示框都直接用，不必各算一遍
+  for (const s of slices) s.pct = total > 0 ? Math.round((s.value / total) * 1000) / 10 : 0;
+  const n = round && Number.isFinite(round.n) ? Math.trunc(round.n) : (i >= 0 ? i + 1 : null);
+  return { index: i, round: n, total, slices };
 }
 
 /**
- * 一局的历史 → 折线图要的每回合序列（从早到晚）。
+ * 一局的历史 → 存档用的每回合序列（从早到晚）。
  *
  * 一回合 = 一次战斗（`battleId` 变了就归档一回合），每个点是一次战斗自己的总量与它自己的时长；
  * 横轴用**游戏自己的回合号**（`round`，m.public.round），没有就退回自增序号。
@@ -309,111 +313,86 @@ export function readMatch(recordId, storage = globalThis.localStorage) {
 }
 
 /**
- * 最近存档的一局（按 `at`）→ `{ id, entry }`；表空时 null。
- *
- * 结算页上「最近一局」就是刚打完那局，所以按钮拿不到对应编号时用它兜底 —— 编号是一路传递的（事件 detail →
- * 按钮），任何一环没接上都会让弹窗显示「没数据」，而兜底能保证只要有存档就画得出来。
- */
-export function newestMatch(storage = globalThis.localStorage) {
-  const byRecord = readLog(storage);
-  let best = null;
-  for (const id of Object.keys(byRecord)) {
-    const entry = byRecord[id];
-    if (!entry || !Array.isArray(entry.rounds) || !entry.rounds.length) continue;
-    if (!best || (entry.at || 0) > (best.entry.at || 0)) best = { id, entry };
-  }
-  return best;
-}
-
-/**
- * 折线调色板（**白底用**，所以取饱和的深色）：一人一条线，按图例顺序（总量从大到小）取色。
+ * 饼图调色板（**白底用**，所以取饱和的深色）：一个扇区一个单位，按占比从大到小取色。
  */
 export const LINE_COLORS = Object.freeze([
   '#d9480f', '#0b7285', '#1971c2', '#7048e8', '#c2255c', '#2b8a3e',
   '#e8590c', '#5f3dc4', '#0c8599', '#a61e4d', '#364fc7', '#5c940d',
 ]);
 
-/** 第 i 条线的颜色（超出调色板就循环）。ECharts 的 color 数组就按这个顺序给。 */
+/** 第 i 个扇区的颜色（超出调色板就循环）。ECharts 的 color 数组就按这个顺序给。 */
 export const colorAt = (i) => LINE_COLORS[i % LINE_COLORS.length];
 
+/** 占比文案：一位小数、整数不带 `.0`（`NaN` / 缺值记 `0%`）。提示框与扇区标签共用。 */
+export function fmtPct(n) {
+  const v = Number(n);
+  const p = Number.isFinite(v) ? Math.round(v * 10) / 10 : 0;
+  return `${Number.isInteger(p) ? p : p.toFixed(1)}%`;
+}
+
 /**
- * ECharts 的 option（**纯函数，可单测**）。
+ * ECharts 的**饼图** option（纯函数、可单测）。
  *
- * 交互全交给 ECharts（用户指定用 ECharts）：
- *   · `tooltip.trigger: 'axis'` + `order: 'valueDesc'` → 参考图那种跟随鼠标的提示框，数值从大到小排；
- *   · `legend` 自带点击隐藏 / 显示折线，并在图例文字后面补上该干员这一局的总量。
- * 隐藏某些线之后纵轴由 ECharts 自动按**剩余可见线**重算（与它默认行为一致）。
+ * 一张饼 = 某一回合各单位的占比（`roundPie()` 的输出），交互全交给 ECharts：
+ *   · `tooltip.trigger: 'item'` → 鼠标移到扇区上显示「单位 / 数值 / 占比」；
+ *   · `legend` 自带点击隐藏 / 显示扇区，图例文字后面补上该单位的占比；
+ *   · `label` 直接写在扇区外圈（单位名 + 占比），扇区多的回合也能一眼看出谁占大头。
  *
- * @param {{ series: { name: string, points: number[] }[], rounds: number[], axisName?: string, totals?: Record<string, number>, t?: (s: string, p?: any) => string }} o
+ * 空切片时 `series[0].data` 为空数组 —— 但界面在这种情况下根本不渲染图表（显示空状态）。
+ * @param {{ slices?: { name: string, value: number, pct?: number }[], round?: number|null, axisName?: string, t?: (s: string, p?: any) => string }} [o]
  */
-export function echartsOption({ series, rounds, axisName = '', totals = {}, t = (s) => s }) {
-  const list = Array.isArray(series) ? series : [];
-  const roundLabels = (Array.isArray(rounds) ? rounds : []).map((r) => String(r));
+export function pieOption({ slices = [], round = null, axisName = '', t = (s) => s } = {}) {
+  const list = Array.isArray(slices) ? slices : [];
+  let sum = 0;
+  for (const s of list) sum += Math.max(0, Number(s && s.value) || 0);
+  const byName = new Map(list.map((s) => [s.name, s]));
+  const pctOf = (s) => (sum > 0 ? (Math.max(0, Number(s.value) || 0) / sum) * 100 : 0);
+  const head = t('第 {n} 回合', { n: round == null ? '—' : round });
   return {
     animation: false,
     color: list.map((_, i) => colorAt(i)),
-    grid: { left: 66, right: 78, top: 48, bottom: 32 },
     tooltip: {
-      trigger: 'axis',
+      trigger: 'item',
       confine: true,
-      order: 'valueDesc',
-      axisPointer: { type: 'line', lineStyle: { color: '#9aa3a0', type: 'dashed' } },
       backgroundColor: '#ffffff',
       borderColor: '#d5dbd9',
       textStyle: { color: '#0b0f14', fontSize: 12 },
-      formatter: (params) => {
-        const arr = Array.isArray(params) ? params : [params];
-        if (!arr.length) return '';
-        const head = t('第 {n} 回合', { n: arr[0].axisValue });
-        const rows = arr.map((p) => `<div style="display:flex;align-items:center;gap:8px;line-height:1.6">`
-          + `<span style="width:8px;height:8px;border-radius:50%;background:${p.color};display:inline-block"></span>`
-          + `<span style="flex:1;color:#3b4450">${p.seriesName}</span>`
-          + `<b style="margin-left:16px;font-variant-numeric:tabular-nums">${fmtInt(p.value)}</b></div>`).join('');
-        return `<div style="font-weight:700;margin-bottom:4px">${head}</div>${rows}`;
+      formatter: (p) => {
+        const first = Array.isArray(p) ? p[0] : p;
+        if (!first) return '';
+        const s = byName.get(first.name);
+        const pct = s ? pctOf(s) : (Number(first.percent) || 0);
+        return `<div style="font-weight:700;margin-bottom:4px">${head}</div>`
+          + '<div style="display:flex;align-items:center;gap:8px;line-height:1.6">'
+          + `<span style="width:8px;height:8px;border-radius:50%;background:${first.color};display:inline-block"></span>`
+          + `<span style="flex:1;color:#3b4450">${first.name}</span>`
+          + `<b style="margin-left:16px;font-variant-numeric:tabular-nums">${fmtInt(s ? s.value : first.value)}</b>`
+          + `<span style="margin-left:10px;color:#5b6470">${fmtPct(pct)}</span></div>`;
       },
     },
     legend: {
       type: 'scroll',
-      top: 0,
+      bottom: 0,
       left: 0,
       right: 0,
-      itemWidth: 14,
-      itemHeight: 8,
+      itemWidth: 12,
+      itemHeight: 12,
       itemGap: 14,
       textStyle: { color: '#1a2027', fontSize: 12 },
-      formatter: (name) => `${name}  ${fmtInt(totals[name] || 0)}`,
+      formatter: (name) => `${name}  ${fmtPct(byName.has(name) ? pctOf(byName.get(name)) : 0)}`,
     },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: roundLabels,
-      name: t('回合'),
-      nameLocation: 'end',
-      nameGap: 8,
-      nameTextStyle: { color: '#5b6470', fontSize: 11 },
-      axisLine: { lineStyle: { color: '#d5dbd9' } },
-      axisTick: { show: false },
-      axisLabel: { color: '#4b545f', fontSize: 12 },
-    },
-    yAxis: {
-      type: 'value',
-      name: axisName,
-      nameTextStyle: { color: '#5b6470', fontSize: 11 },
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: { color: '#4b545f', fontSize: 12, formatter: (v) => fmtInt(v) },
-      splitLine: { lineStyle: { color: '#e3e7e6' } },
-    },
-    series: list.map((s, i) => ({
-      name: s.name,
-      type: 'line',
-      smooth: false,
-      symbol: 'circle',
-      symbolSize: 6,
-      lineStyle: { width: 2.2 },
-      itemStyle: { color: colorAt(i) },
-      emphasis: { focus: 'series' },
-      data: (s.points || []).slice(),
-    })),
+    series: [{
+      name: axisName || t('占比'),
+      type: 'pie',
+      radius: ['38%', '64%'],
+      center: ['50%', '46%'],
+      minAngle: 2,
+      avoidLabelOverlap: true,
+      itemStyle: { borderColor: '#ffffff', borderWidth: 2 },
+      label: { color: '#1a2027', fontSize: 12, formatter: (p) => `${p.name} ${fmtPct(p.percent)}` },
+      labelLine: { length: 10, length2: 8, lineStyle: { color: '#c2c9c7' } },
+      emphasis: { scale: true, scaleSize: 6, label: { fontWeight: 700 } },
+      data: list.map((s) => ({ name: s.name, value: Math.max(0, Number(s.value) || 0) })),
+    }],
   };
 }

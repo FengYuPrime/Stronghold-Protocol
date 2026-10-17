@@ -525,6 +525,255 @@ describe('extract.py: the fx run is opt-in', { skip: !PY && 'no python3' }, () =
   });
 });
 
+// A client's bundles live in two roots: the base one and, after a hot update, PersistentData/Bundles with the same
+// relative layout. The client reads the overlay's copy — the base root's `skinpack/char_1040_blaze2.ab` is the pack it
+// shipped with, without the outfits that arrived later (国家图书馆's nlc skins) — so every read resolves through
+// Roots.pick and a CAB scan merges the overlay first. A prefab also spells its group / #n in lower case
+// (`char_1033_swire2_ambiencesynesthesia#4`), while index.json's skinFx is keyed by the official id, whose case the
+// catalogue (data/skins.json) keeps: the id is re-spelled from the catalogue. The tree the two root tests walk is a set
+// of Paths with pathlib's existence checks stubbed (no bundle, no temp dir: only the resolution itself is under test).
+describe('fx.py bundle roots (base + hot-update overlay) and the official skin id', { skip: !PY && 'no python3' }, () => {
+  test('Roots: the overlay is <Arknights_Data>/PersistentData/Bundles; pick() prefers its copy, else the base root\'s', () => {
+    const out = py(`
+import pathlib
+base = pathlib.Path('/ark/Arknights_Data/StreamingAssets/AB/Windows')
+ov = pathlib.Path('/ark/Arknights_Data/PersistentData/Bundles')
+loose = pathlib.Path('/loose')
+files = {base / 'skinpack/char_1040_blaze2.ab', ov / 'skinpack/char_1040_blaze2.ab',
+         ov / 'skinpack/char_2025_shu.ab', base / 'battle.ab'}
+dirs = {ov, loose}
+pathlib.Path.is_file = lambda self: self in files
+pathlib.Path.is_dir = lambda self: self in dirs
+posix = lambda p: None if p is None else pathlib.Path(p).as_posix()
+r, plain = fx.Roots(base), fx.Roots(loose)
+print(json.dumps({'overlay': posix(r.overlay), 'order': [posix(p) for p in r.newest_first()],
+                  'shadowed': posix(r.pick('skinpack/char_1040_blaze2.ab')), 'onlyOverlay': posix(r.pick('skinpack/char_2025_shu.ab')),
+                  'onlyBase': posix(r.pick('battle.ab')), 'missing': posix(r.pick('skinpack/char_999_none.ab')),
+                  'plain': [posix(plain.overlay), posix(plain.pick('battle.ab')), len(plain.newest_first())]}))`);
+    assert.equal(out.overlay, '/ark/Arknights_Data/PersistentData/Bundles');
+    assert.deepEqual(out.order, [out.overlay, '/ark/Arknights_Data/StreamingAssets/AB/Windows'], 'the overlay is read first');
+    assert.equal(out.shadowed, `${out.overlay}/skinpack/char_1040_blaze2.ab`, 'a hot-updated pack shadows the base one');
+    assert.equal(out.onlyOverlay, `${out.overlay}/skinpack/char_2025_shu.ab`);
+    assert.equal(out.onlyBase, '/ark/Arknights_Data/StreamingAssets/AB/Windows/battle.ab',
+      'a bundle the overlay lacks is the base root\'s');
+    assert.equal(out.missing, '/ark/Arknights_Data/StreamingAssets/AB/Windows/skinpack/char_999_none.ab');
+    assert.deepEqual(out.plain, [null, '/loose/battle.ab', 1],
+      'no overlay directory (a path too shallow to hold one): the base root alone, as before');
+  });
+
+  test('scan_cabs: a CAB the overlay holds shadows the base root\'s copy of the same name', () => {
+    const out = py(`
+import pathlib
+base = pathlib.Path('/ark/Arknights_Data/StreamingAssets/AB/Windows')
+ov = pathlib.Path('/ark/Arknights_Data/PersistentData/Bundles')
+loose = pathlib.Path('/loose')
+dirs = {ov, loose, base / 'refs/fx', ov / 'refs/fx'}
+files = {base / 'refs/fx/base.ab', ov / 'refs/fx/hot.ab', base / '[uc]shaders.ab'}
+pathlib.Path.is_file = lambda self: self in files
+pathlib.Path.is_dir = lambda self: self in dirs
+pathlib.Path.rglob = lambda self, pat: (p for p in files if self in p.parents)
+fx.bundle_nodes = lambda p, a, b: ['CAB-shared', 'CAB-' + p.name]
+cabs = fx.scan_cabs(base)
+posix = lambda p: pathlib.Path(p).as_posix()
+print(json.dumps({'shared': posix(cabs['cab-shared']), 'base': posix(cabs['cab-base.ab']),
+                  'hot': posix(cabs['cab-hot.ab']), 'file': posix(cabs['cab-[uc]shaders.ab']),
+                  'loose': sorted(fx.scan_cabs(loose))}))`);
+    assert.equal(out.shared, '/ark/Arknights_Data/PersistentData/Bundles/refs/fx/hot.ab', 'the overlay\'s CAB is indexed');
+    assert.equal(out.base, '/ark/Arknights_Data/StreamingAssets/AB/Windows/refs/fx/base.ab');
+    assert.equal(out.file, '/ark/Arknights_Data/StreamingAssets/AB/Windows/[uc]shaders.ab');
+    assert.deepEqual(out.loose, [], 'a root without an overlay scans as it did before');
+  });
+
+  test('official_skin_ids / skin_id: a prefab\'s lower-case name is filed under the catalogue\'s spelling', () => {
+    const out = py(`
+o = fx.official_skin_ids(${JSON.stringify(ROOT)})
+print(json.dumps({'n': len(o), 'lower': all(k == k.lower() for k in o),
+                  'nlc': fx.skin_id('char_1040_blaze2', 'char_1040_blaze2_nlc#1', o),
+                  'amb': fx.skin_id('char_1033_swire2', 'char_1033_swire2_ambiencesynesthesia#4', o),
+                  'unknown': fx.skin_id('char_x', 'char_x_missingGroup#2', o),
+                  'empty': fx.skin_id('char_1033_swire2', 'char_1033_swire2_ambiencesynesthesia#4', {})}))`);
+    assert.ok(out.n > 500, `the catalogue lists the official ids: ${out.n}`);
+    assert.equal(out.lower, true, 'keyed case-folded');
+    assert.equal(out.nlc, 'char_1040_blaze2@nlc#1');
+    assert.equal(out.amb, 'char_1033_swire2@ambienceSynesthesia#4', 'the catalogue\'s case, not the prefab\'s');
+    assert.equal(out.unknown, 'char_x@missingGroup#2', 'an id no catalogue lists keeps the prefab\'s spelling');
+    assert.equal(out.empty, 'char_1033_swire2@ambiencesynesthesia#4', 'no catalogue (a direct call): as before');
+  });
+});
+
+// 换装's used set (fx.py skin_referenced, export_fx): a CharacterSkinHooker's `_replaceEffectPairs` pair names the
+// unit's own key (`fromEffect`, the base) and the outfit's (`toEffect`) — BOTH are played in a match, the base by the
+// default outfit and by every outfit that does not replace that key, so both belong to the used set. While only the
+// right side was merged, no export held a base key that a skin replaces: 黍's S3 draws the one-tile ground decal
+// `shu_talent_buff_02`, and only its `_nian#11` / `_nlc#1` variants were extracted — `library.has(base)` false meant
+// the default outfit's S3 drew no decal even with a binding. A fake projectile config names projectile prefabs
+// (`originProjectileKey` / `graphicProjectileKey` / `logicProjecitleKey`), a different table: only a string that is
+// an effect prefab may join the used set, or every run would log a "no such effect prefab" skip line per outfit.
+describe('fx.py skin_referenced: both sides of a skin\'s replace pair, a fake projectile only when it is an effect', { skip: !PY && 'no python3' }, () => {
+  const SF = `sf = {
+  'char_2025_shu@nian#11': {'source': 'skinpack/char_2025_shu.ab char_2025_shu_nian#11',
+    'replace': {'shu_talent_buff_02': 'shu_talent_buff_02_nian#11', 'shu_attack_hit': 'Shu_Attack_Hit_Nian#11'},
+    'fakeProjectiles': [{'originProjectileKey': 'projectile_chr_kalts', 'graphicProjectileKey': 'projectile_chr_kalts_graphic',
+                        'logicProjecitleKey': 'projectile_chr_kalts_logic', 'fakeMuzzlePoint': 5}]},
+  'char_003_kalts@boc#6': {'points': {'SPECIAL_1': [[1, 2, 3]]}}}   # mount points only: no hook, nothing to merge`;
+
+  test('replace: the base and the variant are in the used set (wanted too), the skin-only right side no longer alone', () => {
+    const out = py(`${SF}
+print(json.dumps(sorted(fx.skin_referenced(sf))))`);
+    assert.deepEqual(out, ['projectile_chr_kalts', 'projectile_chr_kalts_graphic', 'projectile_chr_kalts_logic',
+      'shu_attack_hit', 'shu_attack_hit_nian#11', 'shu_talent_buff_02', 'shu_talent_buff_02_nian#11'],
+    'both sides of both pairs (case-folded) + the three projectile keys without an effect list');
+  });
+
+  test('the used set is part of wanted: the base key of a replaced key reaches it', () => {
+    const out = py(`${SF}
+eff = {'common_hit_01', 'shu_talent_buff_02', 'shu_talent_buff_02_nian#11', 'shu_attack_hit', 'shu_attack_hit_nian#11'}
+used = fx.skin_referenced(sf, eff)
+generic = {v for g in fx.FX_GENERIC.values() for v in g.values()}
+wanted = set(fx.FX_SAMPLE_KEYS) | set(fx.FX_COVERAGE_KEYS) | used | generic
+print(json.dumps({'used': sorted(used), 'wanted': sorted(wanted), 'sample': 'common_hit_01' in wanted}))`);
+    assert.deepEqual(out.used, ['shu_attack_hit', 'shu_attack_hit_nian#11', 'shu_talent_buff_02', 'shu_talent_buff_02_nian#11'],
+      'the effect list keeps the four effect keys and drops the projectile prefabs (another table)');
+    for (const k of ['shu_talent_buff_02', 'shu_talent_buff_02_nian#11', 'shu_attack_hit', 'shu_attack_hit_nian#11']) {
+      assert.ok(out.wanted.includes(k), `wanted holds ${k}`);
+    }
+    assert.equal(out.sample, true, 'the sample and the generic keys are still there');
+  });
+
+  test('a fake projectile key that really is an effect prefab is kept; an empty / hookless skinFx is nothing', () => {
+    const out = py(`${SF}
+eff2 = {'shu_talent_buff_02', 'shu_attack_hit', 'shu_attack_hit_nian#11', 'shu_talent_buff_02_nian#11', 'projectile_chr_kalts_graphic'}
+print(json.dumps({'graphic': sorted(fx.skin_referenced(sf, eff2)), 'none': sorted(fx.skin_referenced({})),
+                  'empty': sorted(fx.skin_referenced(None))}))`);
+    assert.ok(out.graphic.includes('projectile_chr_kalts_graphic'), 'a projectile key that is an effect prefab in this client');
+    assert.ok(!out.graphic.includes('projectile_chr_kalts_logic'), 'the others stay out (no skip line per run)');
+    assert.deepEqual(out.none, []);
+    assert.deepEqual(out.empty, [], 'no index (a --fx-keys run of an earlier set): nothing to add');
+  });
+});
+
+// The effect-container index (.cache/fx/effects.json) is what decides whether a key is skipped as "no such effect
+// prefab in this client", so it has to see both roots too: an effect bundle a hot update added (the nlc outfits'
+// `…_nlc#1` keys) lives in PersistentData/Bundles only. Its cache is per bundle (size + mtime) and states the roots it
+// was built from, so a cache written before the overlay existed — or in the older flat layout — is discarded instead of
+// serving exactly the keys that skip. Bundles and the cache file are stubbed (no UnityPy, no temp dir: only the
+// resolution and the cache's validity are under test).
+describe('fx.py container index over both bundle roots (hot-update overlay first)', { skip: !PY && 'no python3' }, () => {
+  const PRELUDE = `
+import pathlib, fnmatch, json, types
+base = pathlib.Path('/ark/Arknights_Data/StreamingAssets/AB/Windows')
+ov = pathlib.Path('/ark/Arknights_Data/PersistentData/Bundles')
+cache = pathlib.Path('/ark/.cache/fx/effects.json')
+GLOBS = ('battle/prefabs/effects/*.ab',)
+rel = 'battle/prefabs/effects/char_1040_blaze2.ab'
+nlc = 'battle/prefabs/effects/nlc.ab'
+BUNDLES, DIRS, CACHE, calls = {}, set(), {}, []   # path → {size, mtime, prefabs}; the overlay's dir; the cache file
+def put(root, name, size, prefabs, mtime=100):
+    p = root / name
+    BUNDLES[p] = {'size': size, 'mtime': mtime, 'prefabs': prefabs}
+    return p
+def fake(args):
+    root, name = args
+    calls.append([root, name])
+    e = BUNDLES[pathlib.Path(root) / name]
+    return name, e['size'], e['mtime'], e['prefabs']
+fx._containers = fake
+pathlib.Path.is_file = lambda self: self in BUNDLES
+pathlib.Path.is_dir = lambda self: self in DIRS
+def glob(self, pat):
+    d, _, name = pat.rpartition('/')
+    parent = self / d if d else self
+    return (p for p in BUNDLES if p.parent == parent and fnmatch.fnmatchcase(p.name, name))
+def read_text(self, **kw):
+    if str(self) not in CACHE:
+        raise FileNotFoundError(str(self))
+    return CACHE[str(self)]
+pathlib.Path.glob = glob
+pathlib.Path.stat = lambda self: types.SimpleNamespace(st_size=BUNDLES[self]['size'], st_mtime=BUNDLES[self]['mtime'])
+pathlib.Path.mkdir = lambda self, *a, **k: None
+pathlib.Path.read_text = read_text
+pathlib.Path.write_text = lambda self, data, **k: CACHE.__setitem__(str(self), data)
+run = lambda: fx.container_index(base, GLOBS, cache, 1, lambda m: None)
+out = {}`;
+
+  test('no overlay: the index is the base root\'s, and a cache hit reads nothing', () => {
+    const out = py(`${PRELUDE}
+put(base, rel, 8, ['blaze2_attack_01_hit'])
+a = run()
+out['a'] = sorted(a)
+out['src'] = a['blaze2_attack_01_hit']
+out['reads'] = len(calls)
+calls.clear()
+b = run()
+out['b'] = sorted(b)
+out['again'] = len(calls)
+out['cache'] = json.loads(CACHE[str(cache)])
+print(json.dumps(out))`);
+    assert.deepEqual(out.a, ['blaze2_attack_01_hit']);
+    assert.equal(out.src, 'battle/prefabs/effects/char_1040_blaze2.ab', 'the key names the bundle it sits in');
+    assert.equal(out.reads, 1);
+    assert.deepEqual(out.b, out.a);
+    assert.equal(out.again, 0, 'size + mtime unchanged: the cache serves the index');
+    assert.equal(out.cache.format, 'fx-container-index');
+    assert.equal(out.cache.version, 2);
+    assert.equal(out.cache.roots.length, 1, 'a client without an overlay states one root');
+  });
+
+  test('an overlay bundle\'s prefabs enter the index, and its copy shadows the base root\'s (both read once)', () => {
+    const out = py(`${PRELUDE}
+put(base, rel, 8, ['blaze2_attack_01_hit'])
+run()                                  # the client as the base root held it (no overlay yet)
+out['first'] = len(calls)
+calls.clear()
+DIRS.add(ov)                           # a hot update arrives: PersistentData/Bundles
+put(ov, nlc, 9, ['blaze2_attack_01_hit_nlc', 'swire2_skill_02_start_nlc'])
+put(ov, rel, 7, ['blaze2_attack_01_hit', 'blaze2_attack_01_hit_nlc'])   # the same pack, hot-updated
+c = run()
+out['c'] = sorted(c)
+out['src'] = c['blaze2_attack_01_hit']
+out['reads'] = sorted([pathlib.PurePath(r).as_posix(), n] for r, n in calls)
+out['cache'] = json.loads(CACHE[str(cache)])
+out['cache']['roots'] = [pathlib.PurePath(r).as_posix() for r in out['cache']['roots']]
+out['pick'] = fx.Roots(base).pick(rel).as_posix()
+print(json.dumps(out))`);
+    assert.equal(out.first, 1, 'the base run read its one bundle');
+    assert.deepEqual(out.c, ['blaze2_attack_01_hit', 'blaze2_attack_01_hit_nlc', 'swire2_skill_02_start_nlc'],
+      'the nlc keys are in the index: the run no longer skips them');
+    assert.deepEqual(out.reads, [['/ark/Arknights_Data/PersistentData/Bundles', 'battle/prefabs/effects/char_1040_blaze2.ab'],
+      ['/ark/Arknights_Data/PersistentData/Bundles', 'battle/prefabs/effects/nlc.ab']],
+    'the overlay\'s copies are the ones read: the base-only run\'s cache was discarded and the pack shadows the base one');
+    assert.deepEqual(out.cache.roots.map((r) => r.split('/').pop()), ['Bundles', 'Windows'], 'overlay first, then the base root');
+    assert.equal(out.cache.version, 2);
+    assert.equal(out.pick, '/ark/Arknights_Data/PersistentData/Bundles/battle/prefabs/effects/char_1040_blaze2.ab',
+      'the rel keeps resolving through the overlay, where the client reads it (the export uses the same pick)');
+  });
+
+  test('a cache of the older flat layout, or an older version of this one, is discarded (its keys would be stale)', () => {
+    const out = py(`${PRELUDE}
+put(base, rel, 8, ['blaze2_attack_01_hit'])
+CACHE[str(cache)] = json.dumps({rel: {'size': 8, 'mtime': 0, 'prefabs': ['stale_key']}})
+a = run()
+out['flat'] = sorted(a)
+out['flatReads'] = len(calls)
+doc = json.loads(CACHE[str(cache)])
+out['flatDoc'] = {'format': doc.get('format'), 'version': doc.get('version'), 'roots': len(doc.get('roots') or [])}
+doc['version'] = 1
+CACHE[str(cache)] = json.dumps(doc)
+calls.clear()
+b = run()
+out['v1'] = sorted(b)
+out['v1Reads'] = len(calls)
+out['v1Doc'] = json.loads(CACHE[str(cache)])['version']
+print(json.dumps(out))`);
+    assert.deepEqual(out.flat, ['blaze2_attack_01_hit'], 'a bare rel → record file names no roots: it is no cache');
+    assert.equal(out.flatReads, 1, 'so the bundle is read again, not taken from the stale file');
+    assert.deepEqual(out.flatDoc, { format: 'fx-container-index', version: 2, roots: 1 });
+    assert.deepEqual(out.v1, ['blaze2_attack_01_hit']);
+    assert.equal(out.v1Reads, 1, 'an older version of this layout is read again too');
+    assert.equal(out.v1Doc, 2);
+  });
+});
+
 /** Every Emit row of an attack (index.json units[id].modes[].attack / combat): its lists, its sub-abilities'. */
 function attackRows(a, out = []) {
   if (!a) return out;

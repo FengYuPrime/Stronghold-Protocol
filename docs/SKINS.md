@@ -9,8 +9,9 @@
 ```
 data/skins.json                目录：每名干员的皮肤 id / 名称 / 系列（无 URL）
         │
-        ├── data/assets.json 的 chars[charId].skins[skinId] = { name, group, avatar, spine? }
+        ├── data/assets.json 的 chars[charId].skins[skinId] = { name, group, avatar, spine?, tokens? }
         │        ↑ 只有真的把模型下载到 public/assets/spine/op/<charId>/<stem>/{front,back}/ 之后才带 spine
+        │        ↑ tokens = 这套皮肤换模型的召唤物（官方 tokenSkinMap，见下文「召唤物换装」）
         │
         └── public/js/ui/skinPicker.js   详情页的「换装」区块（挑一套 / 恢复默认）
                  │
@@ -46,7 +47,7 @@ data/skins.json                目录：每名干员的皮肤 id / 名称 / 系�
 | `public/js/ui/skins.js` | store + localStorage + `installSkinsSync`（`room.skins`，welcome 重发、编辑去抖、RATE 重试） |
 | `public/js/ui/skinPicker.js` | 「换装」区块：头像、名称、系列、已装配/未安装标记、未安装时的提示 |
 | `public/js/screens/loadout.js` | 详情页在「特质」之后插入 `<SkinSection/>` |
-| `public/js/assets.js` | `spineEntry(m, id, {skin})`（带 `fallback`）、`avatarUrl(m, id, {skin})`、`hasBackSpine(m, id, skinId)`、`unitPictureUrl(m, id, opts)` |
+| `public/js/assets.js` | `spineEntry(m, id, {skin})`（带 `fallback`）、`tokenSkinSpine(m, tokenId, skinId)`（召唤物换装）、`avatarUrl(m, id, {skin})`、`hasBackSpine(m, id, skinId)`、`unitPictureUrl(m, id, opts)` |
 | `public/js/render/{app.js,app/info.js,units.js}` | `skin` 进 `renderInfo` / `pieceInfo` / 视图签名；模型与头像按 skin 解析，`hasBack` 也带 skin |
 | `public/js/data.js` | `DATA_FILES.skins = 'skins.json'` |
 | `public/js/ui/gameComponents.js` | `GAME_FILES` 加 `'skins'`（对局中也能打开干员调配） |
@@ -54,10 +55,56 @@ data/skins.json                目录：每名干员的皮肤 id / 名称 / 系�
 | `server/{net.js,lobby.js}` | `session.skins`、`freezeSkins`、`case 'room.skins'`、`skins()`、seats / `humanSeat` 带上 skins |
 | `server/match/match/{platform.js,views.js}` | `Match.setSkins()`（无阶段门）、`publicView().players[].skins`（空则整个字段省略） |
 | `server/match/{PlayerState.js,player/basics.js,player/round.js,player/views.js}` | ctor 恢复 seat.skins、`setSkins`、`skinFor`、battleInput / pieceView 带 skin |
-| `server/sim/{units.js,battle/players.js,snapshot.js}` | `Unit.skin`、部署时透传、`unitInfo.skin`（**`undefined` 而非 `null`**：`JSON.stringify` 丢掉它，没有皮肤的对局线格式不变） |
+| `server/sim/{units.js,battle/players.js,snapshot.js}` | `Unit.skin`、部署时透传、**召唤物继承主人的皮肤**（`_makeAlly` + 棋盘 late 链接）、`unitInfo.skin`（**`undefined` 而非 `null`**：`JSON.stringify` 丢掉它，没有皮肤的对局线格式不变） |
 | `public/css/screens/loadout.css` | `.lo-skins` / `.lo-skin*`（单行列表，与 `.lo-mods` 同一观感） |
 | `public/i18n/{en,ja,ko,zh-TW}.json` | 9 条新字符串 |
-| `test/skins.test.js` | 目录形状、协议合法性、清单一致性、素材缺失时的回退 |
+| `test/skins.test.js` | 目录形状、协议合法性、清单一致性、素材缺失时的回退、召唤物换装（`tokenSkinMap`） |
+| `test/sim/skins-token.test.js` | 召唤物继承主人皮肤（`Unit.skin` / `unitInfo.skin`）、无皮肤时线格式不变 |
+
+## 召唤物换装（官方 `tokenSkinMap`）
+
+主人穿着皮肤时，他技能召唤出的 token 也换成该皮肤的模型（否则瓶子/装置仍是原皮）。数据来自官方皮肤表
+`.cache/skin-table.json`（`tools/skins.mjs` 下载并缓存）里每套皮肤的 `tokenSkinMap`：
+
+```jsonc
+// charSkins['char_1033_swire2@ambienceSynesthesia#4'].tokenSkinMap  （律动方格）
+[{ "tokenId": "token_10031_swire2_gdtrap", "tokenSkinId": "token_10031_swire2_gdtrap_ambienceSynesthesia#4" }]
+// 大多数皮肤是 null（不换召唤物）；表里 2401 套皮肤中 66 套非 null，例：
+// char_250_phatom@sale#4     → token_10007_phatom_twin_sale#4
+// char_391_rosmon@epoque#17  → token_10012_rosmon_shield_epoque#17
+```
+
+数据落地（`node tools/skins.mjs inject` 写，**不手改 `data/*.json`**）：
+
+```jsonc
+chars[owner].skins[skinId].tokens[tokenId] = { tokenSkinId, spine }   // spine 与干员皮肤同一套结构（含 anims）
+```
+
+- 只写**磁盘上真有模型文件**的那几个（`public/assets/spine/token/<tokenId>/<stem>.{skel,atlas,png}`，
+  `stem = tokenSkinId` 的站点 stem）。素材管线从官方表的 `tokenSkinMap` 派生**全部 82 条**变体
+  （`tools/assets/plan.mjs` 的 `tokenSkinStem` / `spineVariants`，每个变体一个模型、同一个 token 目录），
+  所以一次 `fetch-assets` 就会把上游有的皮肤模型都拉下来；没有下载到的（网络、上游缺文件）照旧画 token 自己的模型。
+  注意：模型写在哪套皮肤下，还要求该皮肤的干员与 token 在 `data/assets.json` 里有条目（它由棋池 / `data/backups.json`
+  决定），池外的干员先只有文件、不会被写到 `chars[...].skins[...].tokens`。token 的 `owner` 由池内
+  `tokensUsedByPool` 给出，池内没归属的（自选 6★ 的召唤物）从皮肤表这套皮肤的干员反推 —— 已有 owner 不会被覆盖，
+  干员不在清单里时不派生，只在 plan 的 notes 里记一条汇总。
+- 本地客户端提取器（`tools/local-extract/extract.py` 的 `TOKEN_SPINES`）只导出 40 个 token 的**默认**模型到
+  `public/assets/local/spine/token/<tokenId>/`，不含皮肤变体 —— 也就是说「原皮模型」来自本地提取，「皮肤模型」来自
+  上游素材，两者并不冲突。
+
+渲染（`public/js/assets.js`）：`spineEntry(tokenId, { skin })` 的 token 分支先问 `tokenSkinSpine()`（按
+`tokens[tokenId].owner` → `chars[owner].skins[skin].tokens[tokenId]`），命中即用该模型，并把 token 自己的模型
+（本地提取优先 → 上游 `spine`）记成 `fallback`；没命中（多数皮肤、模型没装、token 无 owner）就还是 token 自己的模型。
+sim 只是把皮肤 id 透传：`Unit.skin` 由召唤者继承（`_makeAlly` 与棋盘上「先列 token 后列主人」的 late 链接两条路径），
+`snapshot.unitInfo.skin` 因此带上 —— 纯展示字段，不影响确定性；没有皮肤的对局 `skin` 仍是 `undefined`（JSON 丢弃），
+线格式逐字节不变。
+
+```powershell
+node tools/skins.mjs inject     # 生成上面的 tokens 块（dry-run 只打印：--dry-run）
+```
+
+`tools/fetch-assets.mjs` 重新生成清单会丢掉 `tokens` 块（和 `chars[].skins` 一样），所以顺序仍是
+`fetch-assets` → `skins inject`。
 
 ## 皮肤素材：`tools/skins.mjs`
 
@@ -133,7 +180,7 @@ node tools/skins.mjs verify
 | `plan` | 只打印。默认给统计（271 套 / 1315 文件 / 磁盘已有几个）；加 `--chars=` 或 `--limit=` 才逐条列 URL 与落地路径（并标出该套用的是哪种上游布局） |
 | `layout` | 探测每个皮肤的上游布局并记住（`.cache/skins-layout.json`）。**上游不是统一的**：有的干员是 `char_x/<stem>/{Front,Back}/`，有的只有 `char_x/<stem>/Spine/`（实测 5 名干员 32 个目录里 13 个是单文件夹），研究表一律按 Front/Back 写，所以不探测就必然有一批 404 |
 | `fetch` | 先自动探测缺失的布局，再下载头像与模型；`--concurrency=N`（默认 8）、`--force`、`--side=front\|back`、`--chars=`/`--limit=`。开跑前试写一次 `public/assets`，写不进去立刻停手并给 `icacls … /reset` 提示 |
-| `inject` | 把磁盘上真有文件的皮肤写进 `data/assets.json`（含 `anims` 解析）；`--dry-run`、`--no-spine`、`--manifest=` |
+| `inject` | 把磁盘上真有文件的皮肤写进 `data/assets.json`（含 `anims` 解析，以及官方 `tokenSkinMap` 里磁盘上真有模型的召唤物 `tokens` 块）；`--dry-run`、`--no-spine`、`--manifest=` |
 | `verify` | 按客户端 `validSpine()` 的规则复查：skel/atlas/贴图在盘、`anims` 已解析；`--fix` 把缺 `anims` 的条目就地补上（只重解析 anims，不动别的字段） |
 
 **下载源的优先级**（`candidates()`）：commit 固定的 jsDelivr → 分支名 jsDelivr → 资产管线那套 jsDelivr 回退 → GitHub 原始源（mirror 模式下前缀代理优先）。原因：`raw.githubusercontent.com` 在国内线路上连不上（实测连接超时），而 jsDelivr 对这 18 GB 的仓库也能正常取文件——**前提是路径对**（路径错是 404，不会假成功）。`fetch` 启动时会用 GitHub API 取一次模型仓库的 HEAD commit，给 jsDelivr 多一条固定版本地址。

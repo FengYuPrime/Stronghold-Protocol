@@ -168,7 +168,7 @@ test('S2 嘉禾盈仓 (data DEFAULT: casts at her attack on an enemy): 25 s, her
   }
 });
 
-test('S3 离离枯荣 (SKILL_RANGE + an injured ally of x-2 — no enemy needed, an enemy alone does not cast it): range x-2, ATK +22 % / +34 %, every attack on an enemy also heals the most injured other ally for ATK; with no enemy her attack heals (herself included)', () => {
+test('S3 离离枯荣 (SKILL_RANGE + an injured ally of x-2 — no enemy needed, an enemy alone does not cast it): range x-2, ATK +22 % / +34 %, every attack on an enemy also heals the most injured ally of x-2 for ATK (herself included); with no enemy her attack heals (herself included)', () => {
   for (const [tier, elite, mod] of [[5, false, null], [6, true, GUAX]]) {
     const sk = skillOf(tier, elite, S3);
     const others = [{ uid: 2, chessId: 't_a', row: 12, col: 5 }, { uid: 3, chessId: 't_b', row: 12, col: 9 }];
@@ -192,15 +192,17 @@ test('S3 离离枯荣 (SKILL_RANGE + an injured ally of x-2 — no enemy needed,
     const hh = healsBy(h, u, (x) => x.t >= hit.t - 1e-9);
     assert.equal(hh[0]?.target, a, `T${tier}: the attack heals the injured ally`);
     approx(hh[0].amount, u.s.atk, `T${tier}: for ATK`, 1e-3);
-    // she alone injured: an enemy attack heals nobody; with no enemy her attack heals her
+    // she alone injured: an attack on the enemy heals her too (the owner's decision); with no enemy her attack heals her
     a.hp = a.s.maxHp;
     u.hp = u.s.maxHp * 0.7;
     const n0 = healsBy(h, u).length;
-    h.run(3);
-    assert.equal(healsBy(h, u).length, n0, `T${tier}: the attack-heal is for the others`);
+    assert.ok(h.runUntil(() => healsBy(h, u).length > n0, 3), `T${tier}: an attack on the enemy heals her`);
+    assert.equal(healsBy(h, u)[n0].target, u, `T${tier}: herself, the most injured of x-2`);
+    approx(healsBy(h, u)[n0].amount, u.s.atk, `T${tier}: for ATK`, 1e-3);
+    const n1 = healsBy(h, u).length;
     h.b.kill(e, u);
-    assert.ok(h.runUntil(() => healsBy(h, u).length > n0, 3), `T${tier}: no enemy: a heal attack`);
-    assert.equal(healsBy(h, u)[n0].target, u, `T${tier}: on herself`);
+    assert.ok(h.runUntil(() => healsBy(h, u).length > n1, 3), `T${tier}: no enemy: a heal attack`);
+    assert.equal(healsBy(h, u)[n1].target, u, `T${tier}: on herself`);
     assert.ok(h.hooksOf('attack').some((x) => x.attacker === u && x.targets[0] === u), `T${tier}: an attack (ASPD / 缴械 count)`);
     assert.ok(h.runUntil(() => !u.skill.active, sk.duration), `T${tier}: ends`);
     assert.deepEqual(u.liveRangeGrid, [[0, 0]], `T${tier}: back to 0-1`);

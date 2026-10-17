@@ -40,7 +40,7 @@
 //   onDisconnect(session)                  the session's socket closed (session kept for the reconnect window)
 //   onExpire(session)                      the session was purged (disconnected longer than the window)
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { C2S, validateC2S } from '../shared/protocol.js';
 import { ERR, ERR_TEXT, NAME_MAX_LEN, PROTOCOL_VERSION } from '../shared/constants.js';
@@ -61,6 +61,7 @@ export const NET_DEFAULTS = Object.freeze({
   heavyPerSec: 2,               // refill of the bucket for resend-heavy intents (HEAVY_TYPES)
   heavyBurst: 6,
   trustProxy: 'auto',           // forwarding headers: 'auto' = from loopback/private peers only, true = always, false = never
+  ownerToken: null,             // 服主密钥 (env SP_OWNER_TOKEN): hello `owner` grants the session the owner privilege; null = off
 });
 
 /**
@@ -133,6 +134,12 @@ export class Session {
      * window). A solo run keeps its session resumable for the official `singleReconnectTime` (24 h) — see lobby.js.
      */
     this.resumeWindowMs = null;
+    /**
+     * @type {boolean} 服主 (the server owner): this session presented the server's `SP_OWNER_TOKEN` in a hello (`owner`).
+     * Never refused by the match-player limit and never counted against it (server/lobby.js Lobby.start). The key itself
+     * is never kept here, never logged and never sent back.
+     */
+    this.owner = false;
   }
 }
 
@@ -322,6 +329,14 @@ export function sendSession(session, msg) {
 
 /** @param {unknown} rid */
 const validRid = (rid) => Number.isInteger(rid) && rid >= 0 && rid <= MAX_RID;
+
+/** Do two non-empty secrets match? Compared as SHA-256 digests in constant time (never as strings). */
+function sameSecret(given, expected) {
+  if (typeof given !== 'string' || !given || typeof expected !== 'string' || !expected) return false;
+  const a = createHash('sha256').update(given).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 
 /**
  * True for a real ERR code (own property; rejects inherited names like "constructor").
@@ -695,6 +710,11 @@ export class Network {
     session.lastSeen = now;
     session.addr = conn.ip;
     session.limitKey = conn.key;
+    // 服主密钥 (SP_OWNER_TOKEN, server/http/config.js ownerToken): a page that carries it in its URL sends it in
+    // `hello.owner`. Correct → this session plays as the server owner for the rest of its life (a later resume without
+    // the key keeps it: the reconnect token is the identity). Wrong or absent → nothing at all: no error, no hint, and
+    // nothing is logged (a wrong key must not reveal that one is needed, nor end up in a log line).
+    if (!session.owner && msg.owner != null && sameSecret(msg.owner, this.opts.ownerToken)) session.owner = true;
 
     let extra = null;
     try { extra = this.handler.welcomeInfo?.() ?? null; } catch (e) { this.log.error('[net] welcomeInfo crashed', e); }

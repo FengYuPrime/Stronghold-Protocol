@@ -42,10 +42,11 @@
 //   _rangeIdModeIndex 1) for ATK, ATK +atk, block +block_cnt, attack interval +base_attack_time s (a flat +1.3 on her 1.2
 //   s; ASPD and 缴械 still count), T1 ×extra_extend_scale.
 // - S3 离离枯荣 (MANUAL): her range becomes the skill range x-2 (_rangeIdModeIndex 2; "视野扩大至治疗范围"), ATK +atk; every
-//   attack on an enemy also heals the most injured allied unit of that range other than herself for ATK
-//   (shu_s_3[heal_in_attack]: the Heal selector excluding her); with no enemy to attack her attack heals the most injured
-//   allied unit of the range, herself included (the mode's Attack-else-Heal ability). While a ground enemy stands on a
-//   sown tile every allied operator of her range — 孤立 ones too — ATK +e_atk and ASPD +e_attack_speed (× min(enemies,
+//   attack on an enemy also heals the most injured allied unit of that range, herself included, for ATK
+//   (shu_s_3[heal_in_attack] — the owner's decision: the sibling heal of the no-enemy case already takes her, so both
+//   heal the same list); with no enemy to attack her attack heals the most injured allied unit of the range, herself
+//   included (the mode's Attack-else-Heal ability). While a ground enemy stands on a sown tile every allied operator of
+//   her range — 孤立 ones too — ATK +e_atk and ASPD +e_attack_speed (× min(enemies,
 //   e_max_stack_cnt)); a ground enemy that enters a sown tile is marked with that tile (once) and each time it then enters
 //   a tile at a Manhattan distance ≥ max_distance from it, it is put back on that tile's centre (unblocked, its route
 //   re-planned from there; waypoints already passed stay passed), stealth or 无敌 notwithstanding; a 消失 (hidden) enemy loses
@@ -141,11 +142,9 @@ export default {
       if (n > 0) { battle.fx('healField', { x: c, y: r, id: unit.id }); farm(battle, unit); }
       return n;
     };
-    /** S3: the most injured healable allied unit of her current range (`others`: not herself). */
-    const healTarget = (battle, unit, others) => {
-      const list = battle.injuredAlliesInKeys(unit.rangeKeySet || new Set(unit.rangeKeys || []), unit);
-      return others ? list.find((a) => a !== unit) ?? null : list[0] ?? null;
-    };
+    /** S3: the most injured healable allied unit of her current range (herself included). */
+    const healTarget = (battle, unit) =>
+      battle.injuredAlliesInKeys(unit.rangeKeySet || new Set(unit.rangeKeys || []), unit)[0] ?? null;
 
     return {
       skills: {
@@ -169,9 +168,10 @@ export default {
           targeting: { rangeGrid: g3 },
           onStart({ unit }) { unit.mem.shuMarks = new Map(); },
           onAttack({ battle, unit, targets }) {
-            // shu_s_3[heal_in_attack]: an attack on an enemy also heals the most injured allied unit of her range but her
+            // shu_s_3[heal_in_attack]: an attack on an enemy also heals the most injured allied unit of her range —
+            // herself included (the owner's decision, as with the no-enemy heal below)
             if (!targets?.length || targets[0].side !== 'enemy') return;
-            const a = healTarget(battle, unit, true);
+            const a = healTarget(battle, unit);
             if (a) battle.heal(unit, a, unit.s.atk * unit.s.atkScaleMul);
           },
           onTick({ battle, unit }) {
@@ -214,7 +214,7 @@ export default {
             if (unit.atkCd > 0 || !unit.canAct || unit.s.flags.disarm || !unit.profile) return;
             const prof = effectiveProfile(unit);
             if (acquireTargets(battle, unit, prof).length) return;
-            const a = healTarget(battle, unit, false);
+            const a = healTarget(battle, unit);
             if (!a) return;
             performAttack(battle, unit, { ...prof, dmgType: 'heal', heal: { mode: 'single' }, atkScale: 1, healScale: 1, projectile: 'none', splashRadius: 0, chain: null, hits: 1 }, [a]);
             unit.atkCd = Math.max(unit.atkCd, unit.s.interval);

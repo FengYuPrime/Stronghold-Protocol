@@ -606,7 +606,13 @@ Semantics below are read from the field names, the data and the client's type, f
   (`_SetPosAndRotToMountPoint`) take the point's position and its world rotation: the unit's Graphic tilt (−30° about
   X), the FaceSwitcher's turn for a unit facing left (180° about the skeleton plane's up axis: the client tweens that
   node's rotation to turn a unit) and, for a point a BoneFollower keeps on a bone, the bone's angle — such prefabs are
-  authored along the point, unturned about X (灰毫's `ashlok_attack_01_start`).
+  authored along the point, unturned about X (灰毫's `ashlok_attack_01_start`). Because the client sets the effect's
+  **root transform** (its position, and the rotation above) to that point, a prefab whose root is the `ParticleEffect`
+  is drawn AT the point: the offset its root was authored at is the extraction's editor layout and is dropped
+  (`shu_talent_buff_01`'s [-1.94, -1, 0]; ranges laid out in a row, `enemy_nhpbr_attack_range` z 10). Only the
+  authored pose goes — what a clip animates on top of it stays — and a prefab with `_spawnLocation` NONE, or one whose
+  `ParticleEffect` is not the root (a projectile / trail placed by its flight), keeps its offset
+  (render/vfx/effect.js `rootAtPoint`).
 * `_rotateType` (*metadata* RotateType): 0 NONE, 1 FLIP_TWO_SIDE (mirror for a left-facing owner), 2 FOUR_DIRECTION,
   3 FIXED_DIRECTION, 4 ANY_DIR; `_leftIsDefault` (the art faces left), `_mainDir`, `_useBodyRotation`, `_rotationY` /
   `_rotationZ` / `_flipZ` (`{node}`: the helper nodes the direction turns / flips — e.g. `inside_attack_01_hit`'s
@@ -1292,13 +1298,17 @@ index.json — version 1 and the version 2 fields (§33.12, §33.15; Phase 3c) �
     prefab of the unit's plan, its skill's `effects`, its modes' rows, its `refs` or its `startEffect`.
   - A kit fx that stands for an official effect the client plays there is bound to it (`FX_BINDINGS`, now with `keys`
     — prefabs no projectile record lists as reached —, `hold: 'fx'` — the fx's own `duration` / `dur` / `hold` —,
+    `hold: 'owner'` — as long as its owner stands, for a lasting state the sim clears with her —, `tiles` (one copy per
+    tile offset), `decal` — outside the effects budget, `system.js MAX_EFFECTS` —,
     `during` — only while the skill lasts — and owner `'skill'` for an fx that names no owner): the areas 锡人 S1 / S2,
     引星棘刺 S1 / S3, 波登可 S2, 歌蕾蒂娅 S3 (tornado) and 异客 S3 (storm) are their skill projectiles' reached
     effects at the fx's tile for the area's time (the projectile stays where it lands: AuraHitBehaviour); 异客 S3's
     strikes `pasngr_skill_03_hit`; 溯光星源 S2's links the link projectile's hit on each pulled enemy; 焰影苇草 S2's
     fire strikes `reed2_skill_02_hit`; 蕾缪安 S3's lock the aim projectile's crosshair (`lemuen_skill_03_crosshair_range`
     / `_02`, 1.5 s without a hold [ASSUMED])
-    and her bombard the attack projectile's reached hit.
+    and her bombard the attack projectile's reached hit; 黍 S3's 'healField' the one-tile ground decal
+    `shu_talent_buff_02` on the five tiles her T1 sows, laid once per newly sown cross and held until she leaves the
+    field (her sown set is cleared on death / retreat, never by time: `hold: 'owner'`, `decal`).
   - A kit fx kind the skill's own official effects stand for is skipped while the skill lasts (`FX_COVER`: on, its
     activation frame, `COVER_AFTER_S` = 1 s after its end [ASSUMED], or a binding of the owner still held) when the
     skill's plan has an installed prefab: 莫斯提马 S2's zone, 白面鸮 S2's and 流明 S1's heal fields (his: the skill's
@@ -1522,7 +1532,12 @@ a LIMITED buff without a key or time lasting its ability; a SpineEffectEmitter p
 buff's blackboard (`next_projectile_key`, `projectile`) or a template's EmitProjectile action names (9 skills above) —
 in `projectiles`, not tied to an ability; the 5 unreferenced `Combat` nodes; template-created buffs' lives (their
 CreateBuff data is not read for `life`); talents and abilities whose nodes name no effect (stat buffs, card plugins:
-nothing to draw).
+nothing to draw). A talent can also export its effect without any use placing it (`uses: []`, the key in
+`unclassified`: 黍's 天赋 1, `shu_talent_buff_01` — the extractor's buff reading, `tools/local-extract/fx.py` node_entry /
+behaviour_uses, does not reach the field that names it): `render/vfx/talents.js ownerFallbackUses` binds such a key when it
+names a talent and its prefab is a loop placed on its holder (neither a tile nor the camera: `prefabs[key].spawn`) — a
+loop on the owner — *assumed*, since the data does not say. The other six keys in that state stay unbound: they are
+another node's bullet, hit plot, trap or mark, and the owner is not where they go.
 
 ### 33.18 The 驭械术士's floating units (0.3.0, round 46)
 
