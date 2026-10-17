@@ -35,7 +35,8 @@
 //                                                        and a README; dsl also writes one operator and one prep spec
 //                                                        (it passes check and pack as it is);
 //                                                        without arguments the templates are listed
-//   node tools/plugin.mjs test <id>                     run the installed plugin's author tests (executes local code)
+//   node tools/plugin.mjs test <id>                     run the installed plugin's author tests (executes local code;
+//                                                        Node's spec report on every Node version)
 //   node tools/plugin.mjs errors [--markdown] [--lang zh|en] [--write]
 //                                                        the error catalogue (every code, its plain words, what to do);
 //                                                        --markdown its symptom table, --write puts the tables into
@@ -199,7 +200,11 @@ export async function main(argv) {
     try {
       const file = path.join(tmp,'set.json'); fs.writeFileSync(file,JSON.stringify(set));
       const env = {...process.env,SP_PLUGIN_TEST_SET:file}; delete env.NODE_TEST_CONTEXT;
-      const r = spawnSync(process.execPath,['--import',path.join(REPO,'server/plugins/scriptTestSetup.js'),'--test',...tests],{
+      // --import takes a module specifier: a file URL, never a path (on Windows `C:\…` reads as the URL scheme `c:`)
+      const setup = pathToFileURL(path.join(REPO,'server/plugins/scriptTestSetup.js')).href;
+      // One report everywhere: Node's default is spec in a terminal but TAP when the output is not one on Node 22
+      // (an IDE console, a redirect, CI) and spec there too from Node 23
+      const r = spawnSync(process.execPath,['--import',setup,'--test-reporter=spec','--test',...tests],{
         stdio:'inherit',env,timeout:120000,
       });
       return r.status ?? 1;

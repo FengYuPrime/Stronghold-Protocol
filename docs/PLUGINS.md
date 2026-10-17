@@ -871,6 +871,8 @@ its composition preloaded, SDK registrations installed and the official bounds s
 gates remain unchanged. This command is explicit authorization to execute local code: it does not require
 `SP_PLUGIN_SCRIPTS` or a matching `plugins/config.json` trusted pin (a missing/stale pin does not stop it). Review the
 files being tested; this is not validation that they are the production-pinned version. Test execution has a 120 s CLI timeout [ASSUMED].
+The report is Node's spec reporter on every supported Node version, also when the output is not a terminal (an IDE
+console, a redirect, CI), where Node 22 would otherwise print TAP.
 
 ### P3b sandbox execution
 

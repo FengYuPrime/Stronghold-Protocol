@@ -474,20 +474,43 @@ test('preview and dry-run leave Object.prototype unchanged on success and on a p
 test('two language codes that canonicalise together are refused and write nothing', async () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-forge-lang-'));
   const pack = path.join(parent, 'pack');
+  // en and EN name two files whose paths do not differ only by case: i18n/en.json + i18n/EN.json are one file on a
+  // case-insensitive disk (macOS, Windows) but two on Linux, where the case clash is refused first (checked below)
   writePack(pack, {
     id: 'lang-alias', name: '别名', version: '1.0.0', license: 'CC0-1.0', content: [],
-    i18n: { en: 'i18n/en.json', EN: 'i18n/EN.json' },
+    i18n: { en: 'i18n/en.json', EN: 'i18n/en-caps.json' },
   }, {
     'i18n/en.json': JSON.stringify({ hello: 'hi' }),
-    'i18n/EN.json': JSON.stringify({ hello: 'HI' }),
+    'i18n/en-caps.json': JSON.stringify({ hello: 'HI' }),
   });
+  const casePack = { id: 'lang-case', name: '大小写', version: '1.0.0', license: 'CC0-1.0', content: [],
+    i18n: { en: 'i18n/en.json', EN: 'i18n/EN.json' } };
+  const caseFiles = { 'i18n/en.json': JSON.stringify({ hello: 'hi' }), 'i18n/EN.json': JSON.stringify({ hello: 'HI' }) };
+  const written = () => dirsOf(parent).filter((n) => n !== 'pack' && n !== 'case-pack');
   try {
     const got = await importForge(pack, { ...forgeOpts(parent), out: path.join(parent, 'lang-alias') });
     assert.equal(got.ok, false);
     assert.equal(got.issues[0].code, 'PLUGIN_FORGE_INPUT');
     assert.match(got.issues[0].detail, /same language/);
-    assert.deepEqual(dirsOf(parent).filter((n) => n !== 'pack'), []);
+    assert.deepEqual(written(), []);
     assert.equal(got.markdown.includes(os.homedir()), false);
+    // i18n/en.json and i18n/EN.json side by side: a zip holds both names on every disk, a folder only on a
+    // case-sensitive one; either way the names clash by case, which is refused before the language rule (nothing written)
+    const zip = zipOf([{ name: 'pack.json', data: Buffer.from(JSON.stringify(casePack)) },
+      ...Object.entries(caseFiles).map(([name, body]) => ({ name, data: Buffer.from(body) }))]);
+    const zipped = await importForge({ zip }, { ...forgeOpts(parent), out: path.join(parent, 'lang-case') });
+    assert.equal(zipped.ok, false);
+    assert.equal(zipped.issues[0].code, 'PLUGIN_FORGE_ZIP');
+    assert.match(zipped.issues[0].detail, /differs only by case/);
+    const folder = path.join(parent, 'case-pack');
+    writePack(folder, casePack, caseFiles);
+    if (fs.readdirSync(path.join(folder, 'i18n')).length === 2) {
+      const read = await importForge(folder, { ...forgeOpts(parent), out: path.join(parent, 'lang-case') });
+      assert.equal(read.ok, false);
+      assert.equal(read.issues[0].code, 'PLUGIN_FORGE_ZIP');
+      assert.match(read.issues[0].detail, /differs only by case/);
+    }
+    assert.deepEqual(written(), []);
   } finally { fs.rmSync(parent, { recursive: true, force: true }); }
 });
 
