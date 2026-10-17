@@ -58,7 +58,18 @@ export function displayHost(host) {
 export function isProcessEntry(metaUrl) {
   if (!process.argv[1]) return false;
   try {
-    return fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(metaUrl));
+    const argvReal = fs.realpathSync(process.argv[1]);
+    const metaReal = fs.realpathSync(fileURLToPath(metaUrl));
+    if (argvReal === metaReal) return true;
+    // PM2 (fork mode) replaces argv[1] with its own wrapper (ProcessContainerFork.js), so the direct comparison
+    // above never matches and the server would silently not start. PM2 tells us the real script in
+    // `pm_exec_path`; when that is missing, the wrapper only ever loads the target script as the main module.
+    if (process.env.pm_exec_path) {
+      try {
+        return fs.realpathSync(process.env.pm_exec_path) === metaReal;
+      } catch { /* fall through to the wrapper check */ }
+    }
+    return /(?:^|[\\/])ProcessContainerFork\.js$/i.test(argvReal);
   } catch {
     return false;
   }
