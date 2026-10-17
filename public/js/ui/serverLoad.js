@@ -10,11 +10,15 @@
 //   * matchOwners: the server owner's own seats (SP_OWNER_TOKEN), counted apart: they take no room under the limit;
 //   * matchPlayerLimit: the cap; 0 = no limit — then the denominator is left out («对局 12 人») rather than shown as
 //     /0, which would read as a full server.
-//   * online: the humans seated anywhere on the server (a match or a room still in its lobby, bots excluded) — the pool
-//     matchPlayers is drawn from. Only the match's HUD shows it, beside the match count: the hall and the room's top bar
-//     keep the bare «对局 12/20 人» (there the match count is the number being watched; the HUD is where a player is
-//     away from the hall and still asks how busy the server is).
-//   * onlineOwners: how many of those seated humans are the server owner's (server/lobby.js matchLoad).
+//   * online: the humans holding an open socket on the server right now — a seated player (in a match or in a room
+//     still in its lobby), a visitor browsing the hall without a room, a connected spectator; bots have no session and
+//     never count, and a seat kept for its reconnect is not a socket, so it is not counted either (server/lobby.js
+//     matchLoad, net.js Session.connected). The number therefore follows the page: closing a tab lowers it. Because a
+//     dropped seat stays in a match, `online` may briefly read *less* than matchPlayers; the view below floors it at 0.
+//     Only the match's HUD shows it, beside the match count: the hall and the room's top bar keep the bare
+//     «对局 12/20 人» (there the match count is the number being watched; the HUD is where a player is away from the
+//     hall and still asks how busy the server is).
+//   * onlineOwners: how many of those connected humans are the server owner's (server/lobby.js matchLoad).
 //
 // 服主特权 — the same shared frame, two views (`viewerOwner`, the session-level `welcome.me.owner` in store.viewerOwner;
 // room.state is one broadcast, so it can never carry a per-viewer field):

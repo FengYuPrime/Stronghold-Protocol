@@ -1937,8 +1937,16 @@ describe('match player limit', () => {
       return { c, start };
     }
     const health = async () => JSON.parse((await httpReq(srv.port, '/healthz')).body.toString());
+    /** Poll /healthz until its `online` reads `n` (a closed socket reaches the server a tick after terminate()). */
+    async function waitOnline(n, ms = 3000) {
+      const end = Date.now() + ms;
+      let h = await health();
+      while (h.online !== n && Date.now() < end) { await delay(20); h = await health(); }
+      assert.equal(h.online, n, `/healthz online should be ${n}: ${JSON.stringify(h)}`);
+      return h;
+    }
     const done = async () => { for (const c of conns) await c.terminate().catch(() => {}); await srv.close(); };
-    return { srv, player, solo, health, done };
+    return { srv, player, solo, health, waitOnline, done };
   }
 
   after(() => assert.deepEqual(cap.errors, [], 'no server errors logged'));
@@ -1956,8 +1964,8 @@ describe('match player limit', () => {
       assert.equal(before.matchPlayerLimit, 20, 'the default cap, printed by /healthz');
 
       const { c, welcome } = await t.player('Late');
-      assert.deepEqual(welcome.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20, online: 20, onlineOwners: 0 },
-        'welcome carries the numbers (a hall visitor without a room is not seated yet)');
+      assert.deepEqual(welcome.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20, online: 21, onlineOwners: 0 },
+        'welcome carries the numbers: Late\'s own socket is already online (a hall visitor counts — matchLoad counts connections, not seats), though it holds no seat yet');
       // the hall is never limited: creating a room, taking seats and adding AI all work
       assert.equal((await c.request({ t: 'room.create', mode: 'coop', difficulty: 'FUNNY' })).t, 'ok');
       await expectOk(c, { t: 'room.addBot' });
@@ -2094,17 +2102,22 @@ describe('match player limit', () => {
       assert.equal(h.onlineOwners, 1, 'the owner is one of the two humans seated');
 
       // a fresh welcome (a visitor without a room) carries the whole picture — one frame for both views
-      const { welcome: lateW } = await t.player('Late');
+      const { c: lateC, welcome: lateW } = await t.player('Late');
       assert.equal(lateW.me.owner, false, 'a session without the key is no owner');
-      assert.deepEqual(lateW.stats, { matchPlayers: 1, matchOwners: 1, matchPlayerLimit: 20, online: 2, onlineOwners: 1 });
-      assert.equal(serverLoadText(lateW.stats, { withOnline: true, viewerOwner: false }), '在线 1 人 · 对局 1/20 人',
+      assert.deepEqual(lateW.stats, { matchPlayers: 1, matchOwners: 1, matchPlayerLimit: 20, online: 3, onlineOwners: 1 },
+        'online counts the two seated humans and the visitor\'s own socket (a hall visitor holds a connection: matchLoad)');
+      assert.equal(serverLoadText(lateW.stats, { withOnline: true, viewerOwner: false }), '在线 2 人 · 对局 1/20 人',
         'the plain player: no +1, and the owner is out of both counts');
-      assert.equal(serverLoadText(lateW.stats, { withOnline: true, viewerOwner: true }), '在线 2 人 · 对局 1+1/20 人',
+      assert.equal(serverLoadText(lateW.stats, { withOnline: true, viewerOwner: true }), '在线 3 人 · 对局 1+1/20 人',
         'the owner: unchanged — its own seat shown apart');
       // … and the very same numbers go to an owner session: one frame, two views (the frame carries no viewer field)
       const { welcome: owner2W } = await t.player('Owner2', { owner: 'OWNER-KEY' });
       assert.equal(owner2W.me.owner, true);
-      assert.deepEqual(owner2W.stats, lateW.stats, 'room.state / welcome.stats are the same shared numbers for everybody');
+      // a repeated hello of the plain player's own socket, right after: the same population, so byte-for-byte the same
+      // shared numbers — the frame carries no viewer field, only the session-level welcome.me differs
+      const lateAgain = await lateC.hello('Late');
+      assert.equal(lateAgain.stats.online, 4, 'four open pages: two in matches, the visitor and the second owner');
+      assert.deepEqual(owner2W.stats, lateAgain.stats, 'room.state / welcome.stats are the same shared numbers for everybody');
       // the hall shows the match count alone, in each viewer's own view
       assert.equal(serverLoadText(lateW.stats, { viewerOwner: true }), '对局 1+1/20 人', 'the hall: the owner sees +1');
       assert.equal(serverLoadText(lateW.stats), '对局 1/20 人', 'the hall: a plain player sees 1/20');
@@ -2164,6 +2177,90 @@ describe('match player limit', () => {
           '「在线 X 人 · 对局 N/M 人」 is built from the frame the HUD receives');
       } finally { i18n.setLang(prevLang); }
     } finally { await t.done(); }
+  });
+
+  test('online follows the open pages: a closed tab drops it, a seat kept for its reconnect does not', async () => {
+    const t = await boot({ statsRefreshMs: 30 });
+    try {
+      const { c: a, start } = await t.solo('A');
+      assert.equal(start.t, 'ok', JSON.stringify(start));
+      const { c: b } = await t.solo('B');
+      const { c: hall } = await t.player('Hall'); // browsing the hall, no room at all
+      const three = await t.health();
+      assert.equal(three.online, 3, 'three open pages count — the hall visitor included (matchLoad counts connections)');
+      assert.equal(three.matchPlayers, 2, 'both seated humans are in running matches');
+      assert.equal(three.humans, 2, 'humans stays a seat count: the hall visitor holds no seat');
+
+      // the hall tab closes: nothing of it stays behind, and the matches' HUDs hear the lower number
+      await hall.terminate();
+      const two = await t.waitOnline(2);
+      assert.equal(two.matchPlayers, 2, 'closing a hall page never touches the match count');
+
+      // a seated page closes: its seat is kept for the reconnect, its socket is not
+      a.clearInbox(); // frames of a busier server (the room.create / match start frames) must not satisfy the wait below
+      await b.terminate();
+      const one = await t.waitOnline(1);
+      assert.equal(one.matchPlayers, 2, 'B\'s seat is kept (the match runs on for it): the match count does not move');
+      assert.equal(one.humans, 2, 'the kept seat is still a seat, so humans still reads 2');
+      assert.equal(one.online, 1, 'but only A still holds a socket');
+
+      // … and A, inside its match, is told by the stats refresh (the HUD's 在线 count)
+      const fresh = await a.waitFor('room.state', (s) => s.inMatch && !!s.stats && s.stats.online === 1, 3000);
+      assert.equal(fresh.inMatch, true, 'still the running match\'s frame');
+      assert.deepEqual(fresh.stats, { matchPlayers: 2, matchOwners: 0, matchPlayerLimit: 20, online: 1, onlineOwners: 0 },
+        'online may read *below* matchPlayers while a dropped seat waits for its reconnect');
+      const { serverLoadText } = await import('../public/js/ui/serverLoad.js');
+      const i18n = await import('../shared/i18n.js');
+      const prevLang = i18n.getLang?.() ?? 'zh';
+      i18n.setLang('zh');
+      try {
+        assert.equal(serverLoadText(fresh.stats, { withOnline: true }), '在线 1 人 · 对局 2/20 人',
+          'the HUD prints the dropped online count beside the unchanged match count');
+      } finally { i18n.setLang(prevLang); }
+    } finally { await t.done(); }
+  });
+
+  test('bots hold no connection; a connected spectator does (its kept seat outlives its page)', async () => {
+    const t = await boot();
+    try {
+      const { c: host } = await t.player('Host');
+      const room = await createRoom(host);
+      await expectOk(host, { t: 'room.addBot' });
+      await expectOk(host, { t: 'room.addBot' });
+      const h1 = await t.health();
+      assert.equal(h1.online, 1, 'two AI seats are no sessions: online counts connections only');
+      assert.equal(h1.bots, 2);
+
+      // a spectator seat is no player seat, but its page is a human online (the 口径: any connected session)
+      const { c: spec } = await t.player('Spec');
+      await expectOk(spec, { t: 'room.spectate', code: room.code });
+      const h2 = await t.health();
+      assert.equal(h2.spectators, 1);
+      assert.equal(h2.online, 2, 'a connected spectator holds a socket: it is counted');
+
+      await spec.terminate();
+      const h3 = await t.waitOnline(1);
+      assert.equal(h3.spectators, 1, 'the spectator seat is kept for its reconnect (the room shows it disconnected)');
+      assert.equal(h3.matchPlayers, 0, 'a spectator is never a player of a match');
+    } finally { await t.done(); }
+  });
+
+  test('an old frame without online still works; the server always sends both counts', async () => {
+    const { serverLoad, serverLoadText } = await import('../public/js/ui/serverLoad.js');
+    const i18n = await import('../shared/i18n.js');
+    const prevLang = i18n.getLang?.() ?? 'zh';
+    i18n.setLang('zh');
+    try {
+      // an older server: no online at all (its HUD showed the match count alone)
+      const old = { matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 };
+      assert.deepEqual(serverLoad(old), { players: 12, owners: 0, limit: 20, online: null, onlineOwners: 0, full: false });
+      assert.equal(serverLoadText(old, { withOnline: true }), '对局 12/20 人', 'no online: the HUD shows the match count alone');
+      assert.equal(serverLoadText(old), '对局 12/20 人', 'the hall never shows online anyway');
+      // one release older: online, no onlineOwners — read as no owner among them
+      assert.equal(serverLoadText({ ...old, online: 3 }, { withOnline: true }), '在线 3 人 · 对局 12/20 人');
+      assert.equal(serverLoadText({ ...old, online: 0 }, { withOnline: true }), '在线 0 人 · 对局 12/20 人');
+      assert.deepEqual(serverLoad({ ...old, online: 0 }), { players: 12, owners: 0, limit: 20, online: 0, onlineOwners: 0, full: false });
+    } finally { i18n.setLang(prevLang); }
   });
 
   test('the client text: ERR_TEXT, the four packs and ui/serverLoad.js agree', async () => {

@@ -54,9 +54,11 @@
 //     refused with ERR.SERVER_FULL (nothing starts; the client shows 「服务器对局已满，请稍后再试」). The hall is never
 //     limited: waiting, browsing and spectating do not count and are never refused. The count and the cap travel with
 //     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit, online,
-//     onlineOwners } (matchStats), and `/healthz` (stats()) — no polling. `online` is how many humans are seated in any
-//     room at all (the same count as stats().humans): the pool the match count is drawn from, which the HUD shows beside
-//     it («在线 15 人 · 对局 12/20 人»).
+//     onlineOwners } (matchStats), and `/healthz` (stats()) — no polling. `online` is how many humans hold an open socket
+//     right now (net.js Session.connected): a seated player, a hall visitor without a room, a connected spectator — but
+//     not a dropped seat kept for its reconnect, so closing a page lowers it at once (it may briefly read less than
+//     matchPlayers; the client floors the owner-free view at 0). The HUD shows it beside the match count
+//     («在线 15 人 · 对局 12/20 人»).
 //   * 服主特权 (SP_OWNER_TOKEN, net.js ownerToken): a session whose hello carried the server's owner key is the owner
 //     (session.owner). Its seats are never counted against the cap and are never refused by it: a room that holds an
 //     owner starts regardless. The key never reaches a log, a frame or /healthz; a wrong one grants nothing.
@@ -235,6 +237,8 @@ function matchPlayerCap(v) {
 
 /**
  * A comparable key of a `stats` object (matchStats): the stats refresh only re-broadcasts a room whose numbers moved.
+ * `online` belongs in it although it is no seat count: it now moves on a bare connect/disconnect (a hall visitor opens
+ * or closes a page), so a room whose seats did not change still gets its `room.state` re-sent when the number moves.
  * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number,
  *   onlineOwners: number }} s
  * @returns {string}
@@ -532,7 +536,11 @@ export class Lobby {
   /** @param {string} code @returns {Room | null} */
   getRoom(code) { return this.rooms.get(String(code).toUpperCase()) || null; }
 
-  /** Counters for /healthz (plus the match-player limit, how much of it is in use, and how many humans are seated). */
+  /**
+   * Counters for /healthz: rooms, running matches, seated humans (`humans`, a seat count — a seat kept for its
+   * reconnect is one), bots, spectator seats, plus the match-player limit, how much of it is in use and how many humans
+   * hold a socket right now (`online`, matchLoad — the two differ by hall visitors and dropped seats).
+   */
   stats() {
     let matches = 0;
     let humans = 0;
@@ -557,29 +565,40 @@ export class Lobby {
    *   * a disconnected human keeps counting: the match keeps running for them (a solo run is resumable for 24 h).
    * The server owner's seats (the `SP_OWNER_TOKEN` sessions, net.js Session.owner) are counted apart (`owners`): they
    * take no room under the limit and are never refused by it.
-   * The same pass counts `online`: every human seated in any room, in a match or still in its lobby — the pool the
-   * match count is drawn from (the same number as stats().humans, bots and spectator seats excluded). It is the
-   * HUD's 「在线 15 人」; a player browsing the hall without a room is not counted. `onlineOwners` is how many of those
-   * seated humans are the server owner's: the client takes them out of both counts for everyone but the owner itself
-   * (ui/serverLoad.js), so a plain player reads an ordinary 「在线 15 人 · 对局 12/20 人」.
+   * The same pass counts `online`: every human that holds an open socket right now (net.js Session.connected) — a
+   * seated player, a hall visitor without a room, a connected spectator — the pool the match count is drawn from. It
+   * is the HUD's 「在线 15 人」, and it follows the page: closing a tab lowers it at once, while a seat kept for its
+   * reconnect no longer counts (so `online` may briefly read *less* than `players`; the client floors at 0).
+   * `onlineOwners` is how many of those connected humans are the server owner's: the client takes them out of both
+   * counts for everyone but the owner itself (ui/serverLoad.js), so a plain player reads an ordinary
+   * 「在线 15 人 · 对局 12/20 人」.
    * @returns {{ players: number, owners: number, online: number, onlineOwners: number }} players: humans under the
-   *   limit; owners: the owner's own seats; online: humans seated anywhere on the server; onlineOwners: the owner's
-   *   seats among them (an owner waiting in its lobby counts here, but not in `owners`)
+   *   limit; owners: the owner's own seats; online: humans holding a socket anywhere on the server; onlineOwners: the
+   *   owner's connected sessions among them
    */
   matchLoad() {
     let players = 0;
     let owners = 0;
-    let online = 0;
-    let onlineOwners = 0;
     for (const r of this.rooms.values()) {
+      if (!r.match) continue;
       for (const s of r.activeHumans()) {
-        online++;
-        const owner = this.isOwner(s);
-        if (owner) onlineOwners++;
-        if (!r.match) continue;
-        if (owner) owners++;
+        if (this.isOwner(s)) owners++;
         else players++;
       }
+    }
+    // `online` is counted from the connection register, not from the seats: a human holding an open socket right now
+    // (net.js Session.connected — the SessionRegistry is the one and only register of connections, so nothing is
+    // double-registered here). That makes the number follow the page: closing a tab drops it on the spot, a visitor
+    // browsing the hall without a room counts like a seated one, a bot has no session and never counts, a connected
+    // spectator counts (it is a human on the server), and a dropped seat that waits for its reconnect does not.
+    // ▸ Because of that last one `online` can sit *below* matchPlayers for a moment (a seat kept for its reconnect,
+    //   its page gone): the client floors the owner-free view at 0 (ui/serverLoad.js), so no count ever goes negative.
+    let online = 0;
+    let onlineOwners = 0;
+    for (const session of this.registry.all()) {
+      if (!session.connected) continue;
+      online++;
+      if (session.owner === true) onlineOwners++;
     }
     return { players, owners, online, onlineOwners };
   }
@@ -591,8 +610,8 @@ export class Lobby {
     return session?.owner === true;
   }
 
-  /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are and how many humans are
-   * seated on it at all (matchLoad). Shared numbers only — a viewer's own owner flag is `welcome.me` (welcomeInfo). */
+  /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are and how many humans hold a
+   * socket on it at all (matchLoad). Shared numbers only — a viewer's own owner flag is `welcome.me` (welcomeInfo). */
   matchStats() {
     const load = this.matchLoad();
     return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers,
@@ -602,17 +621,20 @@ export class Lobby {
   /**
    * 对局人数的刷新 (LOBBY_DEFAULTS.statsRefreshMs): a room whose match is running re-broadcasts its `room.state` with fresh
    * `stats` when the numbers moved — a player inside a match otherwise hears from the hall only at match start, on a
-   * seat change or on welcome, so the HUD's 「在线 15 人」 would freeze for the length of the match. One timer for the
-   * whole lobby, armed when a match starts; it stops itself once no room has a match. Tests call it directly.
+   * seat change or on welcome, so the HUD's 「在线 15 人」 would freeze for the length of the match. `online` moves on a
+   * bare connect/disconnect too (matchLoad), and that reaches the room through this timer alone (a hall visitor's page
+   * closing broadcasts nothing). One timer for the whole lobby, armed when a match starts and on every population
+   * change (onHello / onDisconnect); it stops itself once no room has a match. Tests call it directly.
    */
   refreshStats() {
     this.statsTimer = null;
+    // the numbers are server-wide: one snapshot per tick, compared against every running room's last broadcast
+    const key = this.rooms.size ? statsKey(this.matchStats()) : null;
     let running = 0;
     for (const room of this.rooms.values()) {
       if (room.disposed || !room.match) continue;
       running++;
-      const stats = this.matchStats();
-      if (room.statsSent === statsKey(stats)) continue;
+      if (room.statsSent === key) continue;
       this.broadcastState(room);
     }
     if (running) this.armStatsRefresh();
@@ -640,6 +662,7 @@ export class Lobby {
    * @param {{ resumed: boolean, repeat: boolean }} info
    */
   onHello(session, { resumed, repeat }) {
+    this.armStatsRefresh(); // `online` just moved (a new or resumed socket): a running match's HUD hears it on the tick
     if (!resumed && !repeat) return;
     const room = this.roomOf(session);
     if (!room) {
@@ -773,6 +796,7 @@ export class Lobby {
   /** The session's socket closed. @param {import('./net.js').Session} session */
   onDisconnect(session) {
     this.clearResync(session.playerId); // the next resume resyncs immediately
+    this.armStatsRefresh(); // `online` just dropped (a closed page): a running match's HUD hears it on the tick
     const room = this.roomOf(session);
     // a solo run may be resumed within singleReconnectTime (24 h); everything else keeps the registry's window
     session.resumeWindowMs = room && room.match && room.mode === 'solo' ? this.soloResumeWindowMs() : null;
