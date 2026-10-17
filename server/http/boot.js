@@ -58,7 +58,10 @@ export function displayHost(host) {
 export function isProcessEntry(metaUrl) {
   if (!process.argv[1]) return false;
   try {
-    const argvReal = fs.realpathSync(process.argv[1]);
+    let argvReal = process.argv[1];
+    try {
+      argvReal = fs.realpathSync(process.argv[1]);
+    } catch { /* the wrapper may not be on disk we can see — compare the raw name below */ }
     const metaReal = fs.realpathSync(fileURLToPath(metaUrl));
     if (argvReal === metaReal) return true;
     // PM2 (fork mode) replaces argv[1] with its own wrapper (ProcessContainerFork.js), so the direct comparison
@@ -66,10 +69,10 @@ export function isProcessEntry(metaUrl) {
     // `pm_exec_path`; when that is missing, the wrapper only ever loads the target script as the main module.
     if (process.env.pm_exec_path) {
       try {
-        return fs.realpathSync(process.env.pm_exec_path) === metaReal;
+        if (fs.realpathSync(process.env.pm_exec_path) === metaReal) return true;
       } catch { /* fall through to the wrapper check */ }
     }
-    return /(?:^|[\\/])ProcessContainerFork\.js$/i.test(argvReal);
+    return /ProcessContainerFork\.js$/i.test(argvReal) || /ProcessContainerFork\.js$/i.test(process.argv[1]);
   } catch {
     return false;
   }
