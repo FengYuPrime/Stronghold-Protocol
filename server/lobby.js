@@ -1149,7 +1149,7 @@ export class Lobby {
     const data = this.safeData();
     const cleaned = freezeSkins(skins, (id) => lookup('chess', id, data));
     // 现场排查（换装不生效时）：设 SP_DEBUG_SKINS=1 起服即可看到服务端这一侧的收与发
-    if ((process.env.SP_DEBUG_SKINS || process.argv.includes('--dev'))) {
+    if (process.env.SP_DEBUG_SKINS) {
       this.log.info(`[skins] room.skins ← ${session.playerId}: 收到 ${Object.keys(skins || {}).length} 条，保留 ${Object.keys(cleaned).length} 条`, JSON.stringify(cleaned));
     }
     session.skins = cleaned;
@@ -1169,7 +1169,7 @@ export class Lobby {
     if (r && typeof r === 'object' && r.error) {
       return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
     }
-    if ((process.env.SP_DEBUG_SKINS || process.argv.includes('--dev'))) this.log.info(`[skins] room.skins → 已交给正在进行的对局（${session.playerId}）`);
+    if (process.env.SP_DEBUG_SKINS) this.log.info(`[skins] room.skins → 已交给正在进行的对局（${session.playerId}）`);
     return OK;
   }
 

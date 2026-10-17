@@ -13,6 +13,9 @@ What is read (paths relative to the AB root, see extract.py CANDIDATES):
                                                              MonoScripts (class names of the behaviours)
   charpack/<charId>.ab, chararts/<charId>.ab                 the operators' attack modes / effect emitters, the skin
                                                              mount points (HitPoint, Muzzle, HeadPoint, …)
+  skinpack/<charId>.ab                                       the operators' outfits (换装): a skin's own mount points
+                                                             and the effect prefabs it plays instead of the unit's
+                                                             (Torappu.Battle.CharacterSkinHooker; §33.12 Skin hook)
   battle/prefabs/[uc]projectiles.ab, [uc]skills.ab           projectile flight + effects, the skills' effects
   config/buff_template_holder.ab                             the buff templates (a buff's default effect, its actions)
   battle/enm_pfb_*.ab, pkgrps/btl_pfb_tokens_*.ab            enemies and tokens
@@ -28,7 +31,8 @@ carrying its file's content hash):
                        template actions that cast them, our data's talent ids); per skill its effects with their
                        roles (start / loop / range / hit / end …, from the skill prefab and the buff templates, with
                        the buffs' lives), its abilities' projectiles and the mode it switches to; the projectiles; the
-                       generic keys (hits, deaths, deploy, status loops)
+                       generic keys (hits, deaths, deploy, status loops); skinFx: per worn outfit (换装) the prefabs it
+                       plays in place of the unit's own, its own mount points and its fake projectiles
   textures.json        texture key → size, wrap, filter, alpha, the WebP files
   prefabs/<file>.json  one descriptor per effect prefab: nodes (Unity-native transforms), ParticleSystems (every
                        enabled module), renderers, materials (shader name + resolved render state), decoded clips,
@@ -70,6 +74,13 @@ LINK_BEHAVIOURS = ('ChainLightningEffectBehaviour', 'HarpoonRenderer')
 SKILLS = 'battle/prefabs/[uc]skills.ab'
 ENEMY_GLOB = 'battle/enm_pfb_*.ab'
 TOKEN_GLOB = 'pkgrps/btl_pfb_tokens_*.ab'
+# 换装 (§33.12 Skin hook): an operator's outfits are their own battle prefabs, `skinpack/<charId>.ab` — the client's
+# `battleSkin.skinOrPrefabId` of the official skin_table.json (`char_x@grp#n` → the prefab `char_x_grp#n`), placed under
+# the charpack's Graphic like the chararts defaultskin. Each carries a Torappu.Battle.CharacterSkinHooker that names the
+# prefabs it plays in place of the unit's own; a skin whose prefab names none (its outfit changes the model only) gets no
+# index entry and plays the unit's effects.
+SKIN_ROOT = 'battle/prefabs/skins/character/'
+SKIN_HOOKER = 'CharacterSkinHooker'
 
 # The Phase 1a sample (handoff/vfx-feasibility.md): these effect keys, every effect the sample units reference, the
 # generic keys (FX_GENERIC + every buff_* of buff.ab) and a few prefabs that cover the rarer features of the format
@@ -2990,6 +3001,77 @@ def crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log):
     return units, projectiles, skills, skins, referenced
 
 
+def skin_hooks(ab_root, cabs, units, log):
+    """index.json's `skinFx` (换装, §33.12 Skin hook): every battle skin's own effect prefabs and mount points.
+
+    A skin's battle prefab (`skinpack/<charId>.ab`, container `dyn/battle/prefabs/skins/character/<charId>/<prefab>.prefab`)
+    carries a Torappu.Battle.CharacterSkinHooker: `_replaceEffectPairs` is the prefab the client plays in place of the
+    unit's own (`fromEffect` → `toEffect` — a skill's effects differ with the outfit) and `_fakeProjectileConfigs` the
+    graphic / logic projectile its shot draws instead. Its own mount points come the same way the chararts defaultskin's
+    do (`skin_points`), so an effect sits on the outfit's bones. The entry is keyed by the official skin id
+    (`char_x@grp#n`: the fork's `info.skin`, ui/skins.js) and holds only what the prefab names; a skin whose prefab names
+    none is left out, and the runtime keeps the unit's own effects. `units` is the crawl of `crawl_units`: only the
+    operators it holds are read (their `graphic` places a skin's points), so a sample run scans the sample's outfits."""
+    ab_root = Path(ab_root)
+    out, pairs, with_points = {}, 0, 0
+    for cid in sorted(u for u in units if u.startswith('char_')):
+        rel = f'skinpack/{cid}.ab'
+        if not (ab_root / rel).exists():
+            continue
+        graphic = (units.get(cid) or {}).get('graphic')
+        env = AssetEnv(ab_root, cabs)
+        try:
+            prefabs = env.prefabs(rel, full=True)
+        except Exception as e:
+            log(f'  FAIL skins {cid}: {e!r}')
+            continue
+        found = 0
+        for path in sorted(prefabs):
+            if not path.endswith('.prefab') or SKIN_ROOT not in path:
+                continue
+            prefab = path.rsplit('/', 1)[-1][:-len('.prefab')]
+            if not prefab.startswith(f'{cid}_'):
+                continue
+            replace, fakes = {}, []
+            stack = [prefabs[path]]
+            while stack:
+                cur = stack.pop()
+                gd = env.tt(cur)
+                for c in gd.get('m_Component', []):
+                    f, o = env.resolve(cur.assets_file, c.get('component'))
+                    if o is None or f == 'builtin' or o.type.name != 'MonoBehaviour':
+                        continue
+                    if env.script(o)[1] != SKIN_HOOKER:
+                        continue
+                    d = env.tt(o)
+                    for p in d.get('_replaceEffectPairs') or []:
+                        a, b = p.get('fromEffect'), p.get('toEffect')
+                        if isinstance(a, str) and isinstance(b, str) and a and b:
+                            replace[a.lower()] = b.lower()
+                    for q in d.get('_fakeProjectileConfigs') or []:
+                        fakes.append({str(k).lstrip('_'): v for k, v in q.items() if isinstance(v, (str, int))})
+                stack.extend(go_children(env, cur))
+            pts = skin_points(env, rel, prefab, graphic, container=f'/{cid}/{prefab}.prefab')
+            if not replace and not fakes and not pts:
+                continue
+            e = {'source': f'{rel} {prefab}'}
+            if replace:
+                e['replace'] = dict(sorted(replace.items()))
+            if fakes:
+                e['fakeProjectiles'] = fakes
+            if pts:
+                e['points'] = pts
+                e['graphic'] = graphic
+                with_points += 1
+            out[f'{cid}@{prefab[len(cid) + 1:]}'] = e      # char_x@grp#n, the official skin id
+            pairs += len(replace)
+            found += 1
+        if found:
+            log(f'  skin {cid}: {found} outfits with hooks')
+    log(f'fx: {len(out)} battle skins with hooks ({pairs} replaced effect keys, {with_points} with mount points)')
+    return out
+
+
 # ---- the run ----------------------------------------------------------------------------------------------------------
 
 def _export_worker(args, keys_all=None):
@@ -3167,6 +3249,13 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     units, projectiles, skills, skins, referenced = crawl_units(ab_root, cabs, unit_ids, gd, eff, enemy_idx, token_idx, log)
     timings['units'] = time.time() - t0
 
+    # 换装: the outfits of the operators crawled, their own effect keys and mount points (§33.12 Skin hook). The keys
+    # they play instead of the unit's own are part of the used set — without them a skin has nothing to draw.
+    t0 = time.time()
+    skinfx = skin_hooks(ab_root, cabs, units, log)
+    referenced |= {k for e in skinfx.values() for k in (e.get('replace') or {}).values()}
+    timings['skins'] = time.time() - t0
+
     generic = {v for group in FX_GENERIC.values() for v in group.values()}
     generic |= {k for k, rel in eff.items() if rel in FX_GENERIC_BUNDLES}
     if keys:
@@ -3218,6 +3307,7 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     if isinstance(prev, dict) and prev.get('format') == 'fx-index' and prev.get('version') == INDEX_VERSION:
         # a --fx-keys run: these prefabs replace their earlier copies; the earlier set's units, skills, prefabs stay
         units, projectiles, skills, skins = (prev.get(x) or {} for x in ('units', 'projectiles', 'skills', 'skins'))
+        skinfx = prev.get('skinFx') or {}
         summaries = {**(prev.get('prefabs') or {}), **summaries}
         tex_all = {**((_read_json(out / 'textures.json') or {}).get('textures') or {}), **textures}
         old_groups = (_read_json(fx_manifest) or {}).get('groups') or {}
@@ -3230,7 +3320,7 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     index = {
         'format': 'fx-index', 'version': INDEX_VERSION, 'set': set_name,
         'source': {'root': ab_root.name, 'client': client_version(ab_root)},
-        'units': units, 'projectiles': projectiles, 'skills': skills, 'skins': skins,
+        'units': units, 'projectiles': projectiles, 'skills': skills, 'skins': skins, 'skinFx': skinfx,
         'generic': {**FX_GENERIC, 'keys': sorted(k for k in generic if k in summaries)},
         'prefabs': dict(sorted(summaries.items())),
     }
@@ -3254,8 +3344,8 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
     timings['total'] = time.time() - t_start
     size = sum(p.stat().st_size for p in out.rglob('*') if p.is_file() and not p.name.startswith('.'))
     log(f'fx: {len(entries)} prefabs, {len(textures)} textures, {len(meshes)} meshes, {len(units)} units, '
-        f'{len(projectiles)} projectiles, {len(skills)} skills → {out} ({size / 1e6:.1f} MB), {fx_manifest} '
-        f'({count} entries, {fx_manifest.stat().st_size / 1e6:.2f} MB); '
+        f'{len(projectiles)} projectiles, {len(skills)} skills, {len(skinfx)} skins → {out} ({size / 1e6:.1f} MB), '
+        f'{fx_manifest} ({count} entries, {fx_manifest.stat().st_size / 1e6:.2f} MB); '
         + ', '.join(f'{k} {v:.1f}s' for k, v in timings.items()))
     return total
 

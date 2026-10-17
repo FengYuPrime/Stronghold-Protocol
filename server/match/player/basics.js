@@ -135,7 +135,7 @@ export class PlayerBasics {
       }
     }
     this.skins = Object.freeze(out);
-    if ((process.env.SP_DEBUG_SKINS || process.argv.includes('--dev'))) {
+    if (process.env.SP_DEBUG_SKINS) {
       this.m.log?.info?.(`[skins] PlayerState.setSkins ${this.playerId}: kept ${Object.keys(out).length}${dropped.length ? `, dropped ${dropped.length} (${dropped.slice(0, 5).join(', ')})` : ''}`);
     }
     return Object.keys(out).length > 0;

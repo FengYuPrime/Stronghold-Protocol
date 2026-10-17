@@ -6,7 +6,7 @@
 //   await lib.init()  → lib.available            the file list: GET /data/local-fx.json (the served view: hashed URLs,
 //                                                `{ groups: {} }` without effects), else the `fx*` groups of
 //                                                data/local-assets.json; URLs always come from the list
-//   await lib.index()                            index.json (units, projectiles, skills, skins, generic keys)
+//   await lib.index()                            index.json (units, projectiles, skills, skins, skinFx, generic keys)
 //   lib.def(key) / await lib.load(key)           a compiled prefab (null until loaded / when absent)
 //   await lib.preload(keys, { half })            descriptors + their meshes and textures (a battle's set)
 //   lib.mesh(key), lib.texture(key, half)        loaded data or null (and a load is started)

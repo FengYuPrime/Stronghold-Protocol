@@ -28,6 +28,12 @@
 //   kind, time) / w.damage(v, type, src, time) / w.heal(v, time) / w.status(v, name, on) / w.death(v) / w.deploy(v) /
 //   w.skill(v, on) / w.enemyCast(v, slot) / w.sync(views) / w.simFx(kind, x, y, extra) / w.clear()
 //
+// 换装 (the fork's outfits, ui/skins.js → render/app.js liveInfo `info.skin`): a unit wearing an outfit plays the
+// prefabs its battle skin names in place of the unit's own (index.json `skinFx[skin].replace`, the client's
+// Torappu.Battle.CharacterSkinHooker) and is placed by the outfit's own mount points (`skinFx[skin].points`); a unit
+// with no outfit, one the extraction has no hooks for, or a replacement the local set does not hold keeps the base key
+// (`skinFxOf` / `skinKey` / `skinOfView`, playOn).
+//
 // The cast rows follow their ability events (DESIGN §33.12, resolved): ON_CAST_START rows play when the attack's wind-up
 // begins (render/app.js starts the attacker's Spine clip ahead of the 'atk' event: `castStart`), ON_SPELL_ON rows at the
 // strike (the 'atk' event), a looping row until the attack clip ends; NONE rows play their first slot, directional rows
@@ -276,6 +282,34 @@ export class FxWiring {
   skinOf(u) { return u && u.skin && this.idx ? this.idx.skins[u.skin] || null : null; }
 
   /**
+   * The hook record of the outfit a view wears (index.json `skinFx`, the client's Torappu.Battle.CharacterSkinHooker of
+   * the skinpack prefab): `{ replace, fakeProjectiles?, points?, graphic? }` — `replace` maps a prefab the unit plays
+   * (`fromEffect`) to the one its outfit plays instead (`toEffect`). Null for a unit with no outfit (an enemy, a token)
+   * or one the extraction has no hooks for. 换装 (the fork's outfits, ui/skins.js) fills `info.skin` (render/app.js
+   * liveInfo), so this is the fork's own chain reaching the fx layer.
+   */
+  skinFxOf(v) {
+    const s = v?.info?.skin;
+    return s && this.idx?.skinFx ? this.idx.skinFx[s] || null : null;
+  }
+
+  /**
+   * The skin record a view's effects are placed by: the worn outfit's own (index.json `skinFx[skin]` — its `points` /
+   * `graphic`, the same shape as `skins[id]`: an outfit's Special / Muzzle points sit on other bones, e.g. 蚀清's epoque
+   * SpecialPoint1 on F_Chest6), else the unit's own skin (index.json `skins`). `v` is a view.
+   */
+  skinOfView(v) {
+    const fx = this.skinFxOf(v);
+    return (fx && fx.points) ? fx : this.skinOf(this.unitOf(v));
+  }
+
+  /** The prefab a view's outfit plays in place of `key` (index.json `skinFx[skin].replace`), else `key`. */
+  skinKey(v, key) {
+    const r = this.skinFxOf(v)?.replace;
+    return (r && r[key]) || key;
+  }
+
+  /**
    * Where a view stands, as mounts.js reads it: board feet + facing, the view itself (its model's bones: the
    * BoneFollower points) and the camera's tilt (the plane the drawn model faces).
    */
@@ -332,6 +366,9 @@ export class FxWiring {
     for (const k of this.skills.keys(views)) keys.add(k);
     for (const k of this.talents.keys(views)) keys.add(k);
     for (const k of this.funnels.keys(views)) keys.add(k);   // the 驭械术士's floating units (render/vfx/funnelfx.js)
+    // the outfits the views wear (index.json `skinFx`): the prefabs an outfit plays instead of the unit's own
+    // (wiring.skinKey) load with the battle's set too. The base keys are kept: other units of the battle share them.
+    for (const v of views) for (const to of Object.values(this.skinFxOf(v)?.replace || {})) keys.add(to);
     return [...keys].map(lc).filter((k) => k && this.ofx.lib.has(k));
   }
 
@@ -471,13 +508,16 @@ export class FxWiring {
     let k = lc(key);
     if (!k || !this.ofx.lib.has(k)) return null;
     let def = this.ofx.lib.def(k);
+    // 换装: the outfit the view wears plays its own prefab in place of the unit's (`skinKey`; the extraction holds
+    // both, so a skin the local set has no replacement for keeps the base one) — DESIGN §33.12 Skin hook
+    const sk = lc(this.skinKey(v, k));
+    if (sk && sk !== k && this.ofx.lib.has(sk)) { k = sk; def = this.ofx.lib.def(k); }
     if (def && def.switchable) {
       const alt = lc(this._variant(def.switchable, v, this.pose(v)));
       if (alt === 'common_empty') return null;
       if (alt && alt !== k && this.ofx.lib.has(alt)) { k = alt; def = this.ofx.lib.def(k); }
     }
-    const u = this.unitOf(v);
-    const skin = this.skinOf(u);
+    const skin = this.skinOfView(v);
     const pose = this.pose(v);
     pose.strike = !!o.strike;
     let P = this._placing(def, def ? null : this.idx?.prefabs?.[k] || null, o);
@@ -928,8 +968,7 @@ export class FxWiring {
    * time of its own (a shot flown for show, R16). Returns the battle seconds until the hit.
    */
   _fly(proj, src, tgt, kind, time, o = {}) {
-    const su = this.unitOf(src), tu = this.unitOf(tgt);
-    const sSkin = this.skinOf(su), tSkin = this.skinOf(tu);
+    const sSkin = this.skinOfView(src), tSkin = this.skinOfView(tgt);
     // the start: the mount point as the attack clip poses it at its strike frame (a follow-up shot: as it is drawn then);
     // a rope's end on the shooter follows the point as it is drawn
     const startAt = (out, strike = false) => {
@@ -1231,7 +1270,7 @@ export class FxWiring {
   /** A chain's bounce lands: its line from prev to next (kept on their HitPoints while it shows), its hit on next. */
   _bounce(c, prev, next) {
     if (!next || next.destroyed) return;
-    const ps = this.skinOf(this.unitOf(prev)), ns = this.skinOf(this.unitOf(next));
+    const ps = this.skinOfView(prev), ns = this.skinOfView(next);
     const a = unitPoint(ps, 'hit', this.pose(prev)), b = unitPoint(ns, 'hit', this.pose(next));
     if (c.line && this.ofx.lib.has(c.line)) {
       const h = this.ofx.spawn(c.line, { pos: a.slice(), groundZ: -(prev.z || 0) }, {
