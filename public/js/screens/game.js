@@ -186,6 +186,9 @@ function MatchScreen() {
   // 对局人数 (server/lobby.js matchStats → main.js store.stats): the HUD's 「在线 15 人 · 对局 12/20 人」. A separate
   // subscription: `modRoom` is null in a plain room, so the count must not ride on it (ui/hud.js TopBar `stats`).
   const serverStats = useStore((s) => s.stats, shallowEqual);
+  // 服主特权 (welcome.me.owner, server/lobby.js welcomeInfo): the owner's HUD shows its own seats apart («12+1/20»),
+  // a plain player's shows the owner-free counts (ui/serverLoad.js serverLoadText `viewerOwner`)
+  const viewerOwner = useStore((s) => s.viewerOwner === true);
   // the room's spectator seats for the top bar's 观战席 capsule (ui/hud.js SpectatorPill; GitHub #120): room.state keeps coming
   // during the match, the list is replaced only when a seat changes — shallowEqual keeps an unrelated push from re-rendering
   const specFacts = useStore((s) => ({
@@ -1591,6 +1594,7 @@ function MatchScreen() {
         live=${liveLpNow} spectator=${spectator}
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
         stats=${serverStats}
+        viewerOwner=${viewerOwner}
         onDevGold=${devGoldHandler} onDevLp=${devLpHandler} />
 
       <div class="gm__bonds">

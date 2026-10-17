@@ -53,13 +53,17 @@
 //     disconnected human still counts (the match keeps running for them). room.start that would exceed the cap is
 //     refused with ERR.SERVER_FULL (nothing starts; the client shows 「服务器对局已满，请稍后再试」). The hall is never
 //     limited: waiting, browsing and spectating do not count and are never refused. The count and the cap travel with
-//     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit, online }
-//     (matchStats), and `/healthz` (stats()) — no polling. `online` is how many humans are seated in any room at all
-//     (the same count as stats().humans): the pool the match count is drawn from, which the HUD shows beside it
-//     («在线 15 人 · 对局 12/20 人»).
+//     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit, online,
+//     onlineOwners } (matchStats), and `/healthz` (stats()) — no polling. `online` is how many humans are seated in any
+//     room at all (the same count as stats().humans): the pool the match count is drawn from, which the HUD shows beside
+//     it («在线 15 人 · 对局 12/20 人»).
 //   * 服主特权 (SP_OWNER_TOKEN, net.js ownerToken): a session whose hello carried the server's owner key is the owner
 //     (session.owner). Its seats are never counted against the cap and are never refused by it: a room that holds an
 //     owner starts regardless. The key never reaches a log, a frame or /healthz; a wrong one grants nothing.
+//     ▸ What a frame shows depends on WHO reads it (ui/serverLoad.js): the owner sees its seats apart («在线 16 人 ·
+//     对局 12+1/20 人»), everyone else sees ordinary numbers with the owner taken out of both counts («在线 15 人 ·
+//     对局 12/20 人»). `room.state` is one shared broadcast, so it carries only the shared numbers; the viewer's own
+//     side is the session-level `welcome.me { owner }` (welcomeInfo) — a frame never names who else is the owner.
 //   * Permanent departure during a match (room.leave, g.leave, reconnect window expired): the seat is
 //     marked departed (shown as connected=false), match.onLeave(playerId) is called, and the seat is freed
 //     when the match ends. 'g.leave' is handled here and never reaches match.handle().
@@ -231,10 +235,11 @@ function matchPlayerCap(v) {
 
 /**
  * A comparable key of a `stats` object (matchStats): the stats refresh only re-broadcasts a room whose numbers moved.
- * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number }} s
+ * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number,
+ *   onlineOwners: number }} s
  * @returns {string}
  */
-const statsKey = (s) => `${s.matchPlayers}/${s.matchOwners}/${s.matchPlayerLimit}/${s.online}`;
+const statsKey = (s) => `${s.matchPlayers}/${s.matchOwners}/${s.matchPlayerLimit}/${s.online}/${s.onlineOwners}`;
 
 /**
  * @typedef {{ seat: number, playerId: string, name: string, isBot: boolean, ready: boolean,
@@ -373,9 +378,10 @@ export class Room {
 
   /**
    * `room.state` frame (DESIGN §8.1) plus `inMatch`, and — when the lobby passes them — `stats`, the server's match
-   * occupancy ({ matchPlayers, matchOwners, matchPlayerLimit, online }; Lobby.matchStats): the client shows
-   * 「对局 12/20 人」 (the HUD adds 「在线 15 人」 from `online`).
-   * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number } | null} [stats]
+   * occupancy ({ matchPlayers, matchOwners, matchPlayerLimit, online, onlineOwners }; Lobby.matchStats): the client
+   * shows 「对局 12/20 人」 (the HUD adds 「在线 15 人」 from `online`; each viewer's own owner flag is `welcome.me`).
+   * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number,
+   *   onlineOwners: number } | null} [stats]
    */
   toState(stats = null) {
     return {
@@ -539,7 +545,8 @@ export class Lobby {
     }
     const load = this.matchLoad();
     return { rooms: this.rooms.size, matches, humans, bots, spectators, online: load.online,
-      matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers };
+      matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers,
+      onlineOwners: load.onlineOwners };
   }
 
   /**
@@ -552,23 +559,29 @@ export class Lobby {
    * take no room under the limit and are never refused by it.
    * The same pass counts `online`: every human seated in any room, in a match or still in its lobby — the pool the
    * match count is drawn from (the same number as stats().humans, bots and spectator seats excluded). It is the
-   * HUD's 「在线 15 人」; a player browsing the hall without a room is not counted.
-   * @returns {{ players: number, owners: number, online: number }} players: humans under the limit; owners: the owner's
-   *   own seats; online: humans seated anywhere on the server
+   * HUD's 「在线 15 人」; a player browsing the hall without a room is not counted. `onlineOwners` is how many of those
+   * seated humans are the server owner's: the client takes them out of both counts for everyone but the owner itself
+   * (ui/serverLoad.js), so a plain player reads an ordinary 「在线 15 人 · 对局 12/20 人」.
+   * @returns {{ players: number, owners: number, online: number, onlineOwners: number }} players: humans under the
+   *   limit; owners: the owner's own seats; online: humans seated anywhere on the server; onlineOwners: the owner's
+   *   seats among them (an owner waiting in its lobby counts here, but not in `owners`)
    */
   matchLoad() {
     let players = 0;
     let owners = 0;
     let online = 0;
+    let onlineOwners = 0;
     for (const r of this.rooms.values()) {
       for (const s of r.activeHumans()) {
         online++;
+        const owner = this.isOwner(s);
+        if (owner) onlineOwners++;
         if (!r.match) continue;
-        if (this.isOwner(s)) owners++;
+        if (owner) owners++;
         else players++;
       }
     }
-    return { players, owners, online };
+    return { players, owners, online, onlineOwners };
   }
 
   /** Is this human seat the server owner's (its session presented SP_OWNER_TOKEN)? Bots and seatless ids: false. */
@@ -579,11 +592,11 @@ export class Lobby {
   }
 
   /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are and how many humans are
-   * seated on it at all (matchLoad). */
+   * seated on it at all (matchLoad). Shared numbers only — a viewer's own owner flag is `welcome.me` (welcomeInfo). */
   matchStats() {
     const load = this.matchLoad();
     return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers,
-      online: load.online };
+      online: load.online, onlineOwners: load.onlineOwners };
   }
 
   /**
@@ -1429,15 +1442,19 @@ export class Lobby {
 
   /**
    * Extra fields of every `welcome` (net.js): the operators a 自选 slot may field (shared/diy.js `kitted`), the
-   * server's content identity (header "Content identity") and how full its matches are (`stats`: the hall shows
-   * 「对局 12/20 人」 before a room's `room.state` arrives).
+   * server's content identity (header "Content identity"), how full its matches are (`stats`: the hall shows
+   * 「对局 12/20 人」 before a room's `room.state` arrives) and — session-level, never in the shared `room.state` —
+   * `me: { owner }`: whether THIS session is the server owner, so its page can show its own seats apart
+   * (ui/serverLoad.js). A frame never names who else is the owner; the key itself never leaves the server (net.js).
+   * @param {{ owner?: boolean } | null} [session] the welcomed session (net.js onHelloMsg)
    */
-  welcomeInfo() {
+  welcomeInfo(session = null) {
     const stats = this.matchStats();
-    if (!this.vanilla) return { diyKitted: KITTED_CHARS, stats };
+    const me = { owner: session?.owner === true };
+    if (!this.vanilla) return { diyKitted: KITTED_CHARS, stats, me };
     let n;
     try { n = Number(this.plugins?.unofficial?.()) || 0; } catch { n = 0; }
-    return { diyKitted: KITTED_CHARS, stats, content: n > 0 ? { vanilla: this.vanilla.cs, plugins: n } : { vanilla: this.vanilla.cs } };
+    return { diyKitted: KITTED_CHARS, stats, me, content: n > 0 ? { vanilla: this.vanilla.cs, plugins: n } : { vanilla: this.vanilla.cs } };
   }
 
   // ---------------------------------------------------------------------------------------------------

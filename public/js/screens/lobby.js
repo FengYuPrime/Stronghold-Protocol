@@ -246,6 +246,8 @@ export function LobbyScreen() {
   const conn = useStore((s) => s.connection, shallowEqual);
   // 对局人数 (server/lobby.js matchStats): 「对局 12/20 人」 — the server's own occupancy, from welcome / room.state
   const serverStats = useStore((s) => s.stats, shallowEqual);
+  // 服主特权 (welcome.me.owner): the owner sees its own seats apart («12+1/20»), everyone else plain numbers
+  const viewerOwner = useStore((s) => s.viewerOwner === true);
   useData('config');
   const [roomMode, setRoomMode] = useState(() => (loadPref('lobby.mode', 'coop') === 'solo' ? 'solo' : 'coop'));
   const [difficulty, setDifficulty] = useState(() => {
@@ -324,7 +326,7 @@ export function LobbyScreen() {
         <h1 class="topbar__title">${t('选择模拟协议')}</h1>
       </div>
       <div class="topbar__right">
-        <${ServerLoad} stats=${serverStats} />
+        <${ServerLoad} stats=${serverStats} viewerOwner=${viewerOwner} />
         <${ResumeMatchButton} />
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
         <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>

@@ -562,7 +562,11 @@ export const C2S = {
   },
 };
 
-// Server → client message types (documentation + client dispatch table keys).
+// Server → client message types (documentation + client dispatch table keys). No validation table: an S2C frame is
+// built by the server, so extra fields need no pass-through (the client ignores what it does not know). `welcome` is
+// per session and carries { playerId, token, name, serverNow, version, resumed, diyKitted?, content?, stats?,
+// me? { owner } } — `me.owner` is the 服主 flag (SP_OWNER_TOKEN) of THIS session; `stats` is shared with room.state
+// (a viewer's own view is built client-side, public/js/ui/serverLoad.js).
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',

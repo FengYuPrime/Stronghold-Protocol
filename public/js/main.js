@@ -173,6 +173,9 @@ function onWelcome(msg) {
     installedPlugins: pluginCount(msg.content),
     // 对局人数 (server/lobby.js matchStats): the hall shows 「对局 12/20 人」 before a room.state arrives (ui/serverLoad.js)
     stats: msg.stats && typeof msg.stats === 'object' ? msg.stats : prev.stats,
+    // 服主特权 (SP_OWNER_TOKEN): the session-level welcome.me.owner — an owner sees its own seats apart («12+1/20»),
+    // everyone else sees plain numbers with the owner taken out (server/lobby.js welcomeInfo; ui/serverLoad.js)
+    viewerOwner: msg.me?.owner === true,
   });
   welcomeAt = Date.now();
 

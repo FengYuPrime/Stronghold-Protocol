@@ -83,9 +83,13 @@ export const initialState = Object.freeze({
   installedPlugins: 0,
   session: { entered: false },
   // 对局人数 (server/lobby.js matchStats): the server's match occupancy
-  // { matchPlayers, matchOwners, matchPlayerLimit, online } from `welcome.stats` and every `room.state.stats`; null
-  // until the first one (ui/serverLoad.js; the HUD also shows `online`)
+  // { matchPlayers, matchOwners, matchPlayerLimit, online, onlineOwners } from `welcome.stats` and every
+  // `room.state.stats`; null until the first one (ui/serverLoad.js; the HUD also shows `online`)
   stats: null,
+  // 服主特权 (SP_OWNER_TOKEN): whether THIS session is the server owner — the session-level `welcome.me.owner` (the
+  // shared room.state carries no such field). An owner sees its own seats apart («12+1/20»); everyone else sees plain
+  // numbers with the owner taken out of both counts (ui/serverLoad.js serverLoadText `viewerOwner`)
+  viewerOwner: false,
   room: null,
   match: emptyMatch(),
   ticker: [],

@@ -29,9 +29,11 @@
 //
 // The handler object (implemented by server/lobby.js) receives:
 //   onHello(session, { resumed, repeat })  after `welcome` was sent
-//   welcomeInfo() → object (optional)      extra fields of every `welcome` (never one of its own keys): the lobby's
-//                                          `diyKitted` (0.2.0 自选编队 — which operators a DIY slot may field) and
-//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §32)
+//   welcomeInfo(session) → object (optional)  extra fields of every `welcome` (never one of its own keys): the lobby's
+//                                          `diyKitted` (0.2.0 自选编队 — which operators a DIY slot may field),
+//                                          `content` ({ vanilla: <cs> }, the server's content hash — DESIGN §32) and
+//                                          `me` ({ owner }: whether THIS session is the server owner — 服主特权, a
+//                                          session-level field, so one shared room.state serves both views)
 //   onMessage(session, msg) → { ok: true } | { error: ERR code, detail?: string } | undefined — or a Promise of one
 //                                          (a room whose match runs in a match host worker, DESIGN §32.6: the reply
 //                                          goes out when it settles; a rejection is INTERNAL)
@@ -717,7 +719,9 @@ export class Network {
     if (!session.owner && msg.owner != null && sameSecret(msg.owner, this.opts.ownerToken)) session.owner = true;
 
     let extra = null;
-    try { extra = this.handler.welcomeInfo?.() ?? null; } catch (e) { this.log.error('[net] welcomeInfo crashed', e); }
+    // the welcomed session goes along: an extra field may be session-level (`welcome.me`, the 服主 flag) — the shared
+    // broadcasts stay per-viewer-free
+    try { extra = this.handler.welcomeInfo?.(session) ?? null; } catch (e) { this.log.error('[net] welcomeInfo crashed', e); }
     const welcome = { ...(extra && typeof extra === 'object' ? extra : null), t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed };
     if (validRid(rid)) welcome.rid = rid;
     this.reply(conn, welcome);
