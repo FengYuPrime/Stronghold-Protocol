@@ -82,8 +82,9 @@ export const initialState = Object.freeze({
   // how many unofficial plugins the server has (DESIGN §32 P1a: /healthz or welcome `content.plugins`; content.js)
   installedPlugins: 0,
   session: { entered: false },
-  // 对局人数 (server/lobby.js matchStats): the server's match occupancy { matchPlayers, matchOwners, matchPlayerLimit }
-  // from `welcome.stats` and every `room.state.stats`; null until the first one (ui/serverLoad.js)
+  // 对局人数 (server/lobby.js matchStats): the server's match occupancy
+  // { matchPlayers, matchOwners, matchPlayerLimit, online } from `welcome.stats` and every `room.state.stats`; null
+  // until the first one (ui/serverLoad.js; the HUD also shows `online`)
   stats: null,
   room: null,
   match: emptyMatch(),

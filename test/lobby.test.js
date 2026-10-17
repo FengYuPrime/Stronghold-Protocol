@@ -1952,15 +1952,18 @@ describe('match player limit', () => {
       }
       const before = await t.health();
       assert.equal(before.matchPlayers, 20, 'the one count: humans inside running matches');
+      assert.equal(before.online, 20, 'the same humans are online (no room holds more than its one seat yet)');
       assert.equal(before.matchPlayerLimit, 20, 'the default cap, printed by /healthz');
 
       const { c, welcome } = await t.player('Late');
-      assert.deepEqual(welcome.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20 }, 'welcome carries the numbers');
+      assert.deepEqual(welcome.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20, online: 20 },
+        'welcome carries the numbers (a hall visitor without a room is not seated yet)');
       // the hall is never limited: creating a room, taking seats and adding AI all work
       assert.equal((await c.request({ t: 'room.create', mode: 'coop', difficulty: 'FUNNY' })).t, 'ok');
       await expectOk(c, { t: 'room.addBot' });
       const state = await c.waitFor('room.state', (s) => s.seats.filter(Boolean).length === 2);
-      assert.deepEqual(state.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20 }, 'room.state carries the numbers');
+      assert.deepEqual(state.stats, { matchPlayers: 20, matchOwners: 0, matchPlayerLimit: 20, online: 21 },
+        'room.state carries the numbers: Late is seated in a room, so online grew while the match count did not');
       // … but entering a match does not
       const refused = await c.request({ t: 'room.start' });
       assert.equal(refused.t, 'error');
@@ -1968,6 +1971,7 @@ describe('match player limit', () => {
       assert.equal(refused.msg, '服务器对局已满，请稍后再试');
       const after = await t.health();
       assert.equal(after.matchPlayers, 20, 'nothing started');
+      assert.equal(after.online, 21, 'Late is still a human on the server, just not in a match');
       assert.equal(after.matches, 20);
     } finally { await t.done(); }
   });
@@ -1981,9 +1985,11 @@ describe('match player limit', () => {
       for (let i = 0; i < 3; i++) await expectOk(c, { t: 'room.addBot' });
       const mid = await t.health();
       assert.equal(mid.matchPlayers, 1, 'the room in its lobby counts nothing yet: only A is in a match');
+      assert.equal(mid.online, 2, 'both humans are online: A is in a match, B waits in a room');
       assert.equal((await c.request({ t: 'room.start' })).t, 'ok', 'one more human fits: the AI seats are no humans');
       const full = await t.health();
       assert.equal(full.matchPlayers, 2);
+      assert.equal(full.online, 2, 'online did not change: the same two humans, both now in a match');
       assert.equal(full.bots, 3, 'three AI seats in the running co-op match');
       assert.equal((await t.solo('C')).start.code, ERR.SERVER_FULL, 'the third human is refused');
     } finally { await t.done(); }
@@ -1995,6 +2001,7 @@ describe('match player limit', () => {
       for (let i = 0; i < 4; i++) assert.equal((await t.solo(`U${i}`)).start.t, 'ok', `unlimited match ${i}`);
       const h = await t.health();
       assert.equal(h.matchPlayers, 4);
+      assert.equal(h.online, 4);
       assert.equal(h.matchPlayerLimit, 0, '/healthz says the server is unlimited');
     } finally { await t.done(); }
   });
@@ -2069,24 +2076,41 @@ describe('match player limit', () => {
     for (const code of ['en', 'ja', 'ko', 'zh-TW']) {
       const p = path.join(ROOT, 'public/i18n', `${code}.json`);
       packs[code] = JSON.parse(fs.readFileSync(p, 'utf8'));
-      for (const key of [ERR_TEXT.SERVER_FULL, '对局 {players}/{max} 人', '对局 {players} 人', '同时在对局中的博士人数（服主不计入）']) {
+      for (const key of [ERR_TEXT.SERVER_FULL, '对局 {players}/{max} 人', '对局 {players} 人', '同时在对局中的博士人数（服主不计入）',
+        '在线 {n} 人', '在线人数与同时在对局中的博士人数（服主不计入）']) {
         assert.ok(typeof packs[code][key] === 'string' && packs[code][key], `${code}.json lacks ${key}`);
       }
       assert.ok(!/[一-鿿]/.test(packs.en[ERR_TEXT.SERVER_FULL]), `en.json translates the error text: ${packs.en[ERR_TEXT.SERVER_FULL]}`);
     }
     const { serverLoad, serverLoadText } = await import('../public/js/ui/serverLoad.js');
     const i18n = await import('../shared/i18n.js');
-    assert.deepEqual(serverLoad({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20 }), { players: 12, owners: 1, limit: 20, full: false });
+    assert.deepEqual(serverLoad({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20 }),
+      { players: 12, owners: 1, limit: 20, online: null, full: false }, 'no online field (an older server): null');
+    assert.deepEqual(serverLoad({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20, online: 15 }),
+      { players: 12, owners: 1, limit: 20, online: 15, full: false });
     assert.equal(serverLoad({ foo: 1 }), null, 'no numbers: nothing to show');
     i18n.setLang('zh');
     assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 }), '对局 12/20 人');
     assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20 }), '对局 12+1/20 人', 'the owner shown apart');
     assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 0 }), '对局 12 人', 'no limit: no denominator');
+    // the match HUD: the server's online count in front of the match count (withOnline)
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20, online: 15 }, { withOnline: true }),
+      '在线 15 人 · 对局 12/20 人');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 0, online: 15 }, { withOnline: true }),
+      '在线 15 人 · 对局 12 人', 'no limit: the denominator is still left out');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 1, matchPlayerLimit: 20, online: 16 }, { withOnline: true }),
+      '在线 16 人 · 对局 12+1/20 人', 'the owner is counted online but shown apart in the match count');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20, online: 15 }), '对局 12/20 人',
+      'the hall and the room keep the bare match count');
+    assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 }, { withOnline: true }), '对局 12/20 人',
+      'an older server sends no online: the HUD shows the match count alone');
     assert.equal(serverLoadText(null), '');
     i18n.addMessages('en', packs.en);
     i18n.setLang('en');
     try {
       assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20 }), 'Matches 12/20');
+      assert.equal(serverLoadText({ matchPlayers: 12, matchOwners: 0, matchPlayerLimit: 20, online: 15 }, { withOnline: true }),
+        '15 online · Matches 12/20');
       assert.equal(i18n.t(ERR_TEXT.SERVER_FULL), 'The server has no free match slot right now — please try again later');
     } finally { i18n.setLang('zh'); i18n.setMessages('en', {}); }
   });

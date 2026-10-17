@@ -53,8 +53,10 @@
 //     disconnected human still counts (the match keeps running for them). room.start that would exceed the cap is
 //     refused with ERR.SERVER_FULL (nothing starts; the client shows 「服务器对局已满，请稍后再试」). The hall is never
 //     limited: waiting, browsing and spectating do not count and are never refused. The count and the cap travel with
-//     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit }
-//     (matchStats), and `/healthz` (stats()) — no polling.
+//     the existing frames — `welcome.stats` and `room.state.stats` { matchPlayers, matchOwners, matchPlayerLimit, online }
+//     (matchStats), and `/healthz` (stats()) — no polling. `online` is how many humans are seated in any room at all
+//     (the same count as stats().humans): the pool the match count is drawn from, which the HUD shows beside it
+//     («在线 15 人 · 对局 12/20 人»).
 //   * 服主特权 (SP_OWNER_TOKEN, net.js ownerToken): a session whose hello carried the server's owner key is the owner
 //     (session.owner). Its seats are never counted against the cap and are never refused by it: a room that holds an
 //     owner starts regardless. The key never reaches a log, a frame or /healthz; a wrong one grants nothing.
@@ -360,8 +362,9 @@ export class Room {
 
   /**
    * `room.state` frame (DESIGN §8.1) plus `inMatch`, and — when the lobby passes them — `stats`, the server's match
-   * occupancy ({ matchPlayers, matchOwners, matchPlayerLimit }; Lobby.matchStats): the client shows 「对局 12/20 人」.
-   * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number } | null} [stats]
+   * occupancy ({ matchPlayers, matchOwners, matchPlayerLimit, online }; Lobby.matchStats): the client shows
+   * 「对局 12/20 人」 (the HUD adds 「在线 15 人」 from `online`).
+   * @param {{ matchPlayers: number, matchOwners: number, matchPlayerLimit: number, online: number } | null} [stats]
    */
   toState(stats = null) {
     return {
@@ -510,7 +513,7 @@ export class Lobby {
   /** @param {string} code @returns {Room | null} */
   getRoom(code) { return this.rooms.get(String(code).toUpperCase()) || null; }
 
-  /** Counters for /healthz (plus the match-player limit and how much of it is in use). */
+  /** Counters for /healthz (plus the match-player limit, how much of it is in use, and how many humans are seated). */
   stats() {
     let matches = 0;
     let humans = 0;
@@ -522,7 +525,7 @@ export class Lobby {
       spectators += r.spectators.length;
     }
     const load = this.matchLoad();
-    return { rooms: this.rooms.size, matches, humans, bots, spectators,
+    return { rooms: this.rooms.size, matches, humans, bots, spectators, online: load.online,
       matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers };
   }
 
@@ -534,19 +537,25 @@ export class Lobby {
    *   * a disconnected human keeps counting: the match keeps running for them (a solo run is resumable for 24 h).
    * The server owner's seats (the `SP_OWNER_TOKEN` sessions, net.js Session.owner) are counted apart (`owners`): they
    * take no room under the limit and are never refused by it.
-   * @returns {{ players: number, owners: number }} players: humans under the limit; owners: the owner's own seats
+   * The same pass counts `online`: every human seated in any room, in a match or still in its lobby — the pool the
+   * match count is drawn from (the same number as stats().humans, bots and spectator seats excluded). It is the
+   * HUD's 「在线 15 人」; a player browsing the hall without a room is not counted.
+   * @returns {{ players: number, owners: number, online: number }} players: humans under the limit; owners: the owner's
+   *   own seats; online: humans seated anywhere on the server
    */
   matchLoad() {
     let players = 0;
     let owners = 0;
+    let online = 0;
     for (const r of this.rooms.values()) {
-      if (!r.match) continue;
       for (const s of r.activeHumans()) {
+        online++;
+        if (!r.match) continue;
         if (this.isOwner(s)) owners++;
         else players++;
       }
     }
-    return { players, owners };
+    return { players, owners, online };
   }
 
   /** Is this human seat the server owner's (its session presented SP_OWNER_TOKEN)? Bots and seatless ids: false. */
@@ -556,10 +565,12 @@ export class Lobby {
     return session?.owner === true;
   }
 
-  /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are (matchLoad). */
+  /** The `stats` of a `room.state` / `welcome` frame: how full the server's matches are and how many humans are
+   * seated on it at all (matchLoad). */
   matchStats() {
     const load = this.matchLoad();
-    return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers };
+    return { matchPlayers: load.players, matchOwners: load.owners, matchPlayerLimit: this.opts.maxMatchPlayers,
+      online: load.online };
   }
 
   // ---------------------------------------------------------------------------------------------------

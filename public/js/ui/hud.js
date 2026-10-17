@@ -419,7 +419,7 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
     </div>
 
     <div class="gtop__right">
-      <${ServerLoad} stats=${room?.stats} class="gtop__load" />
+      <${ServerLoad} stats=${room?.stats} class="gtop__load" showOnline=${true} />
       <div class="gtop__clock">
         ${frozenSecs != null
           ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`
