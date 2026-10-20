@@ -1120,9 +1120,12 @@ export class FxWiring {
         this.arrived.set(id, now);
         if ((proj.onHit || []).some((k) => /heal/.test(k))) this.healed.set(id, now);
       }
+      // onReached where it landed — but not a key an FX_BINDINGS entry of the shooter's skill already drew at that tile
+      // (锡人 S1 / S2: the kit's 'zone' fx and the flask's landing are one event; SkillFx.landingDrawn)
+      const drawn = this.skills.landingDrawn(tgt, proj);
       for (const k of proj.onReached || []) {
         const kk = lc(k);
-        if (kk && this.ofx.lib.has(kk)) this.ofx.spawn(kk, { pos: at.slice(), groundZ: at[2] }, {});
+        if (kk && !drawn.has(kk) && this.ofx.lib.has(kk)) this.ofx.spawn(kk, { pos: at.slice(), groundZ: at[2] }, {});
       }
     };
     if (laterAt == null) go();

@@ -152,7 +152,13 @@ history and the open points: DESIGN §32.14.25.
   (`simFx`): a cast flash on the owner in the frame of the skill start or, tagged with the skill, while its loops play;
   a skill-tagged fx standing for the plan's `pulse` rows (its buff's ticks on the owner, its other hits away from it),
   which play there; and `skills.js FX_BINDINGS` (克莱门莎 S3's 'lock': her skill projectile's mark and three strikes on
-  the tile, which also stand for her 'blast's there). A skill with nothing official (no plan, or none of its rows
+  the tile, which also stand for her 'blast's there; 克莱门莎 S2's 'tide': the 漩涡 her kit's cabin leaves where it stops,
+  played as the client's own S2 field `clemnt_skill_02_buff_01` on that tile — the index's only S2 loop, which the plan
+  already plays on her — for the fx's own `dur` and outside the effects budget, `decal`; 锡人 S1 / S2's 'zone': the
+  flask's reached effects — ring, flask on the ground, splash — at the tile, held for the area's time; the attack that
+  fires the AUTO skill is the skill's own (a ReplacementSkill), so its flight's landing does not play those keys a second
+  time where the binding holds them, `skillfx landingDrawn`). A skill with nothing official
+  (no plan, or none of its rows
   extracted) keeps the procedural burst and aura. An effect a plan reaches two ways (a buff's `_buffs` and
   `_extraBuffs`) plays once. A skill attack flies its ability's projectile (index v3 `projectileKey`, else the naming
   rule) and the buffs of its attacks last their `life` (LIMITED: its time or the record's blackboard key; INFINITY: the

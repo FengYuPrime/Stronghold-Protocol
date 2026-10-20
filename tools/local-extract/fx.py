@@ -110,6 +110,22 @@ FX_COVERAGE_KEYS = [
     'lumen_skill_02_hit', 'glady_skill_01_line', 'phatm2_skill_03_buff_02', 'etlchi_innate_hit_01', 'enemy_crstf_buff_01',
     'yu_skill1_attack_01', 'aglna2_skill_02_buff_weapon_02',
 ]
+# Effect keys a binding needs although no data table or skill config names them, so the crawl cannot reach them and a
+# full run would leave the binding with nothing to draw. Kept apart from FX_COVERAGE_KEYS — that list is chosen for the
+# format features it covers (DESIGN §33.13), this one for the keys a hand-written binding asks for. Each value says
+# where the key came from; a key this client lacks is skipped with the usual "no such effect prefab" line.
+EXTRA_COVERAGE_KEYS = {
+    # 克莱门莎 (char_4231_clemnt) S2 「风暴潮」(skchr_clemnt_2): battle/prefabs/effects/clemnt.ab holds all five in its
+    # container (`.cache/fx/effects.json`'s bundle), while the skill's emitters — and so the crawl's `referenced` —
+    # name none of them. Not in index.prefabs / fx/prefabs before this list, hence `library.has(key)` false.
+    'clemnt_skill_02_bullet_01': '克莱门莎 S2: 风暴潮的落地弹特效 01（bullet 01）— crawl 未覆盖',
+    'clemnt_skill_02_bullet_02': '克莱门莎 S2: 落地弹特效 02（bullet 02）— crawl 未覆盖',
+    # bullet_range_01 / mark_02 are the candidates for the official ground vortex (地面旋涡): the AoE decal the storm
+    # tide leaves under its target, drawn by a binding rather than by an emitter row.
+    'clemnt_skill_02_bullet_range_01': '克莱门莎 S2: 落地弹的范围/地面旋涡候选（bullet range 01）— crawl 未覆盖',
+    'clemnt_skill_02_mark_02': '克莱门莎 S2: 地面旋涡候选（mark 02）— crawl 未覆盖',
+    'clemnt_skill_02_mark_enemy': '克莱门莎 S2: 命中敌人身上的标记（mark enemy）— crawl 未覆盖',
+}
 # Generic keys the client binds in code (no data file names them): what the remake shows for a hit by damage type, a
 # death, a deploy, and the status loops keyed by the sim's status names (render/style.js STATUS_ICON)
 FX_GENERIC = {
@@ -3323,6 +3339,21 @@ def _read_json(path):
         return None
 
 
+def coverage_keys():
+    """The prefabs the coverage lists add to every full run: FX_COVERAGE_KEYS (one per rarer format feature) plus
+    EXTRA_COVERAGE_KEYS (keys a binding needs but no data table names)."""
+    return set(FX_COVERAGE_KEYS) | set(EXTRA_COVERAGE_KEYS)
+
+
+def wanted_keys(referenced, generic, keys=None):
+    """The export set of a run (index.json §33.1): a --fx-keys run exports exactly its keys; a full run exports the
+    sample, the coverage lists, the used set (the crawl's `referenced`) and the generic keys — so a full run never drops
+    a key a sample has."""
+    if keys:
+        return set(keys)
+    return set(FX_SAMPLE_KEYS) | coverage_keys() | set(referenced or ()) | set(generic or ())
+
+
 def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, jobs=None, root=None, fx_manifest=None):
     """The fx run (extract.py --only fx): writes <out_root>/fx/** and `fx_manifest` (default <root>/data/local-fx.json:
     the groups FX_GROUPS, every file); returns the number of files written. `manifest` (the groups of
@@ -3370,10 +3401,9 @@ def export_fx(ab_root, out_root, manifest, log, selection='sample', keys=None, j
 
     generic = {v for group in FX_GENERIC.values() for v in group.values()}
     generic |= {k for k, rel in eff.items() if rel in FX_GENERIC_BUNDLES}
-    if keys:
-        wanted = set(keys)
-    else:                         # the used set holds the sample too (a full run never drops a key a sample has)
-        wanted = set(FX_SAMPLE_KEYS) | set(FX_COVERAGE_KEYS) | referenced | generic
+    # the used set holds the sample too, and the coverage lists are the sample's + EXTRA_COVERAGE_KEYS (a full run never
+    # drops a key a sample has)
+    wanted = wanted_keys(referenced, generic, keys)
     missing = sorted(k for k in wanted if k not in eff)
     for k in missing:
         log(f'  skip (no such effect prefab in this client) {k}')

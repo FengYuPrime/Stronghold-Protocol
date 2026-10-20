@@ -922,7 +922,8 @@ def main():
                           'fx': {'sub': fx.FX_SUB, 'version': fx.FORMAT_VERSION, 'indexVersion': fx.INDEX_VERSION,
                                  'meshVersion': fx.MESH_VERSION, 'optIn': True,
                                  'sample': {'keys': fx.FX_SAMPLE_KEYS, 'units': fx.FX_SAMPLE_UNITS,
-                                            'coverage': fx.FX_COVERAGE_KEYS}},
+                                            'coverage': fx.FX_COVERAGE_KEYS,
+                                            'extraCoverage': sorted(fx.EXTRA_COVERAGE_KEYS)}},
                           'scenes': {'sub': scenes.SCENE_SUB, 'tex': scenes.TEX_SUB,
                                      'stages': [{'id': sid, 'bundle': scenes.scene_bundle(sid), 'deps': deps}
                                                 for sid, deps in scenes.SCENES]}},

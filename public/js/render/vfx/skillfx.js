@@ -1054,6 +1054,23 @@ export class SkillFx {
     return sk && sk !== k && this.w.ofx.lib.has(sk) ? sk : k;
   }
 
+  /**
+   * The keys of a projectile's reached effects an FX_BINDINGS entry already drew at this tile and still holds (the same
+   * prefabs, placed on the fx the binding stands for). The kit's fx and the skill projectile's landing are one event of
+   * the official client — 锡人 S1 / S2: the flask's reached effects (`tinman_skill_0N_range_01` ring, `_token_01` flask,
+   * `_start_0N` splashes) *are* the kit's 'zone' — so a cast-frame attack's arrival (the AUTO skill's own attack, which
+   * flies `projectile_chr_tinman_s1` / `_s2` and lands on the tile the kit's zone fx just took) does not play them a
+   * second time. Empty when nothing of the kind is bound there (every other projectile keeps its reached effects).
+   */
+  landingDrawn(tgt, proj) {
+    const out = new Set();
+    const keys = new Set((proj?.onReached || []).map((k) => lc(k)));
+    if (!keys.size || !tgt || !Number.isFinite(tgt.x) || !Number.isFinite(tgt.y)) return out;
+    const now = this.w.ofx.time, c = Math.round(tgt.x), r = Math.round(tgt.y);
+    for (const m of this.marks) if (m.until > now && m.c === c && m.r === r && keys.has(lc(m.h?.key))) out.add(lc(m.h.key));
+    return out;
+  }
+
   // ---- preload ----------------------------------------------------------------------------------------------------
 
   /** Every key the battle's units' skills, charges and bindings can play (FxWiring.begin / more). */

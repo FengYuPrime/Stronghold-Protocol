@@ -525,6 +525,50 @@ describe('extract.py: the fx run is opt-in', { skip: !PY && 'no python3' }, () =
   });
 });
 
+// 克莱门莎 (char_4231_clemnt) S2 「风暴潮」(skchr_clemnt_2): battle/prefabs/effects/clemnt.ab holds five effect keys
+// (the two bullets, the bullet's range and the two marks) that no data table or skill config names — the crawl's
+// `referenced` never held them, so a full run exported none and a binding on them found library.has(key) false.
+// fx.py's EXTRA_COVERAGE_KEYS names them, and wanted_keys is the one place a run's export set is built: the five reach
+// wanted beside the sample / the format coverage / the used set / the generic keys, and nothing else moves.
+describe('fx.py EXTRA_COVERAGE_KEYS: client keys no data table names (克莱门莎 S2)', { skip: !PY && 'no python3' }, () => {
+  const CLEMNT = ['clemnt_skill_02_bullet_01', 'clemnt_skill_02_bullet_02', 'clemnt_skill_02_bullet_range_01',
+    'clemnt_skill_02_mark_02', 'clemnt_skill_02_mark_enemy'];
+
+  test('the whitelist is coverage, and wanted_keys holds it with the sample, the used set and the generic keys', () => {
+    const out = py(`
+cov = fx.coverage_keys()
+ref = {'greyy_attack_01_start', 'ifrit_skill_03_range', 'shu_talent_buff_02'}
+gen = {v for g in fx.FX_GENERIC.values() for v in g.values()}
+w = fx.wanted_keys(ref, gen)
+old = set(fx.FX_SAMPLE_KEYS) | set(fx.FX_COVERAGE_KEYS) | ref | gen
+print(json.dumps({'cov': sorted(cov), 'wanted': sorted(w), 'old': sorted(old),
+                  'keys': sorted(fx.wanted_keys(ref, gen, ['x']))}))`);
+    for (const k of CLEMNT) {
+      assert.ok(out.cov.includes(k), `coverage_keys holds ${k}`);
+      assert.ok(out.wanted.includes(k), `wanted holds ${k} although the crawl does not name it`);
+    }
+    assert.ok(out.old.every((k) => out.wanted.includes(k)),
+      'every key an earlier full run exported is still in wanted (the sample, the format coverage, the used set, the generic keys)');
+    assert.ok(out.wanted.every((k) => out.old.includes(k) || CLEMNT.includes(k)),
+      'nothing else is added: the other operators\' export sets are untouched');
+    assert.deepEqual(out.keys, ['x'], 'a --fx-keys run exports exactly its keys, the whitelist aside');
+  });
+
+  test('the five are the client\'s own keys: clemnt.ab lists them in the container cache (no typo skips)', {
+    skip: !readJson('.cache/fx/effects.json') && 'no .cache/fx/effects.json on this machine',
+  }, () => {
+    const bundle = readJson('.cache/fx/effects.json').bundles['battle/prefabs/effects/clemnt.ab'];
+    assert.ok(bundle && Array.isArray(bundle.prefabs), 'the crawl\'s effect container index knows the bundle');
+    for (const k of CLEMNT) assert.ok(bundle.prefabs.includes(k), `clemnt.ab holds ${k}`);
+  });
+
+  test('--print-jobs lists the whitelist as the run\'s extra coverage', () => {
+    const r = spawnSync(PY, [path.join(TOOL, 'extract.py'), '--print-jobs'], { encoding: 'utf8', env: ENV });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout).fx.sample.extraCoverage, CLEMNT, 'the five keys, sorted');
+  });
+});
+
 // A client's bundles live in two roots: the base one and, after a hot update, PersistentData/Bundles with the same
 // relative layout. The client reads the overlay's copy — the base root's `skinpack/char_1040_blaze2.ab` is the pack it
 // shipped with, without the outfits that arrived later (国家图书馆's nlc skins) — so every read resolves through
@@ -630,7 +674,7 @@ print(json.dumps(sorted(fx.skin_referenced(sf))))`);
 eff = {'common_hit_01', 'shu_talent_buff_02', 'shu_talent_buff_02_nian#11', 'shu_attack_hit', 'shu_attack_hit_nian#11'}
 used = fx.skin_referenced(sf, eff)
 generic = {v for g in fx.FX_GENERIC.values() for v in g.values()}
-wanted = set(fx.FX_SAMPLE_KEYS) | set(fx.FX_COVERAGE_KEYS) | used | generic
+wanted = fx.wanted_keys(used, generic)
 print(json.dumps({'used': sorted(used), 'wanted': sorted(wanted), 'sample': 'common_hit_01' in wanted}))`);
     assert.deepEqual(out.used, ['shu_attack_hit', 'shu_attack_hit_nian#11', 'shu_talent_buff_02', 'shu_talent_buff_02_nian#11'],
       'the effect list keeps the four effect keys and drops the projectile prefabs (another table)');

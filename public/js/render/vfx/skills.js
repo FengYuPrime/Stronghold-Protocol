@@ -1270,9 +1270,24 @@ export const FX_BINDINGS = Object.freeze({
   skchr_clemnt_3: Object.freeze({
     lock: binding({ owner: 'src', projectile: 'projectile_chr_clemnt_s3', at: 'point', hold: 'projectile_life_time', holdS: 5, cover: ['blast'] }),
   }),
+  // 克莱门莎 S2 (op-clemnt.js startCabin / finishCabin): the kit launches the cabin with 'anchor' and, once it has moved its
+  // three tiles, leaves the 漩涡 with 'tide' (x, y = where the cabin stopped, r 1.5, dur = the skill's time left) — a ground
+  // field, not a hit. index.json's skchr_clemnt_2 lists one effect only, the S2 loop clemnt_skill_02_buff_01 (a spinning
+  // water / wind field: the plane background, flow, spiral, wind trail, bubbles), attached to the buff clemnt_s2[switch_mode]
+  // on the caster — the plan already plays it on her for the skill's duration (`hold: 'skill'`). Nothing played it where the
+  // vortex stands, so the kit's 'tide' fell back to the procedural zone (render/fx/kinds.js `tide`). The binding plays the
+  // same official field on that tile as a ground decal (outside the effects budget: MAX_EFFECTS, system.js) for the fx's own
+  // `dur`, so it leaves with the skill [ASSUMED: the extraction holds no separate ground-vortex prefab for her — the client's
+  // S2 bundle has five more keys our used-set does not export (clemnt_skill_02_bullet_01 / _02, _bullet_range_01, _mark_02,
+  // _mark_enemy), so the field's official key cannot be read here; see the report notes]
+  skchr_clemnt_2: Object.freeze({
+    tide: binding({ owner: 'id', keys: ['clemnt_skill_02_buff_01'], at: 'point', hold: 'fx', holdS: 15, decal: true }),
+  }),
   // 锡人 S1 / S2 (chess_char_2_19-tinman.js: the 'zone' on the struck tile, id = him, dur = the area's time): the client's
   // flask (projectile_chr_tinman_s1 / _s2) lands there — its reached effects are the ring (tinman_skill_0N_range_01,
-  // looping), the flask on the ground (_token_01, looping) and the splash (_start_01 / _02)
+  // looping), the flask on the ground (_token_01, looping) and the splash (_start_01 / _02). The kit's fx IS that landing,
+  // so a cast-frame attack's flight (her S1 / S2 are ReplacementSkills: the attack that fires the skill is the skill's own
+  // and flies the same flask) does not play these keys a second time where the binding holds them — skillfx landingDrawn
   skchr_tinman_1: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_tinman_s1', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'] }) }),
   skchr_tinman_2: Object.freeze({ zone: binding({ owner: 'id', projectile: 'projectile_chr_tinman_s2', at: 'point', hold: 'fx', holdS: 8, during: true, cover: ['zone'] }) }),
   // 引星棘刺 S1 / S3 (chess_char_5_15-thorn2.js: a 'zone' on each chosen ally's tile, id = her, duration): the unit she
