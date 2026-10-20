@@ -403,3 +403,56 @@ node --test test/render/vfx-skins.test.js test/render/vfx-swire2.test.js \
 | 皮肤选择与存储 | `public/js/ui/skins.js`、`server/lobby.js`（`room.skins`） |
 | 打包白名单 | `tools/package.mjs`（`isPluginResource`） |
 | PM2 启动判定 | `server/http/boot.js`（`isProcessEntry`） |
+
+---
+
+## 13. 更新记录（本 fork）
+
+### 2026-10-20 · 克莱门莎漩涡特效修复
+
+**修了什么**
+
+- **克莱门莎 `char_4231_clemnt`（补位干员）2 技能「风暴潮」的漩涡特效不显示** → 已修。
+  原因：kit 在放逐舱停下时发 `fx('tide', x, y, …)`，但客户端 `FX_BINDINGS` 里没有 `skchr_clemnt_2` 这条绑定 → `simFx('tide')` 返回 false → 退化成程序化的 3 秒青色圆，官方漩涡从没播过。
+  修法：`public/js/render/vfx/skills.js` 新增
+
+  ```js
+  skchr_clemnt_2: Object.freeze({
+    tide: binding({ owner: 'id', keys: ['clemnt_skill_02_bullet_range_01'], at: 'point', hold: 'fx', holdS: 15, decal: true }),
+  }),
+  ```
+
+  `clemnt_skill_02_bullet_range_01` 是放逐舱落点那份地面场（44 节点 / 36 粒子系统 / `spawn: 7` = 被击中的格子），作为 `decal` 播放，**不占 `MAX_EFFECTS`**，随 fx 自带的 `dur` 与技能一起消失。她身上的循环光环 `clemnt_skill_02_buff_01` 仍由技能 plan 播放，两者不再共用同一个 prefab。
+
+- 同一轮还修了**锡人的重复特效**（与本条无关，但同属渲染层去重）：
+  - 锡人 S1 的「圈」被画两次（`_arrive` 重播 projectile 落地键 + `FX_BINDINGS` 同格同键）→ `skillfx.landingDrawn()` + `wiring._arrive` 跳过已画过的落地键；
+  - 锡人 S2 的 `start_03/_04` 每次施放各播两次（`index.json` 里 `HitTile`/`HitEnemy` 两条同键 uses）→ `skills.js` 的 `planUses()` 末尾 `dedupePlan()`，签名完全相同才合并（全库 27 个技能、47 条重复 entry）。
+
+**如果你更新后漩涡仍然没有特效**
+
+因为特效素材是**从本机游戏客户端现场提取**的（`data/local-fx.json` 与 `public/assets/local/fx/**` 都不进 git），新绑定的键 `clemnt_skill_02_bullet_range_01` 在你机器上可能还不存在。缺键时不会报错，只是**回退成程序化青色圆**。补跑一次提取即可（约 8 分钟）：
+
+```powershell
+# Windows（项目根目录；用仓库自带的 3.12 虚拟环境，依赖齐全）
+.\.venv-extract\Scripts\python.exe tools\local-extract\extract.py --only fx --fx-set used `
+  --game "G:\Hypergryph Launcher\games\Arknights Game\Arknights_Data\StreamingAssets\AB\Windows"
+```
+
+```bash
+# Linux / macOS（把 --game 换成自己的客户端 AB 根：<...>/Arknights_Data/StreamingAssets/AB/Windows）
+.venv-extract/bin/python tools/local-extract/extract.py --only fx --fx-set used \
+  --game "<...>/StreamingAssets/AB/Windows"
+```
+
+要点：
+
+- **必须带 `--fx-set used`**（默认 `sample` 只爬 9 个单位，不含她的键）；
+- 没有 `.venv-extract` 时先建：`py -3.12 -m venv .venv-extract` + `.\.venv-extract\Scripts\pip install -r tools/local-extract/requirements.txt`（**必须 Python ≥ 3.12**，`fx.py` 用了 PEP 701 的 f-string）；
+- 跑完**重启服务器 + 浏览器 `Ctrl+F5`**（0.3.0 启动时把 `/data/*.json` 固化进内容视图）；
+- 验收：`data/local-fx.json` 的 `fx/prefabs` 里出现 `clemnt_skill_02_bullet_range_01`，`index.json` 的 prefabs 计数 9303 → 9308。
+
+**更新后不需要做的事**
+
+- 不需要 `npm run setup`，也不需要 `npm ci`（本轮没有新增依赖）；
+- 但如果你**自己跑过** `npm run setup` 或 `node tools/fetch-assets.mjs`，它会重建 `data/assets.json` 并冲掉皮肤/召唤物映射 → 补一条 `node tools/skins.mjs inject` 即可。
+
