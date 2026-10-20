@@ -25,8 +25,10 @@ setIndexVersion(3);   // as FxLibrary.index() does once index.json is in: no ski
 
 const HER = 'char_4231_clemnt';
 const SKILL = 'skchr_clemnt_2';
-/** The client's S2 field: the only looping effect of the skill (index.json skills.skchr_clemnt_2 uses[0]). */
-const VORTEX = 'clemnt_skill_02_buff_01';
+/** The client's S2 landing field (spawn 7 = the struck tile, looping, 44 nodes): what the cabin leaves on the ground. */
+const VORTEX = 'clemnt_skill_02_bullet_range_01';
+/** Her own S2 loop (index.json skills.skchr_clemnt_2 uses[0]): the plan plays it on her for the skill's duration. */
+const AURA = 'clemnt_skill_02_buff_01';
 const indexFile = (p) => fileURLToPath(new URL(`../../public/assets/local/fx/${p}`, import.meta.url));
 const hasFx = existsSync(indexFile('index.json')) && existsSync(indexFile(`prefabs/${VORTEX}.json`));
 const SKIP = !hasFx && 'the client effects were not extracted here (public/assets)';
@@ -125,8 +127,9 @@ describe('克莱门莎 S2 风暴潮: the 漩涡 is the client\'s own field (FX_B
     assert.equal(bind.decal, true, 'a ground field: outside the effects budget (system.js MAX_EFFECTS)');
     assert.deepEqual(bindingEffects(INDEX, bind), [VORTEX]);
     assert.deepEqual(bindingKeys(INDEX, SKILL), [VORTEX], 'preloaded with her skill');
-    assert.ok(INDEX.prefabs[VORTEX], 'clemnt_skill_02_buff_01 is exported (fx/prefabs)');
+    assert.ok(INDEX.prefabs[VORTEX], `${VORTEX} is exported (fx/prefabs)`);
     assert.equal(INDEX.prefabs[VORTEX].looping, true, 'the client loops it');
+    assert.equal(INDEX.prefabs[VORTEX].spawn, 7, 'spawn 7 = the struck tile, not her (spawn 1)');
   });
 
   test('S2: the sim\'s events open the skill, and the vortex plays once where the cabin stops', async () => {
@@ -136,7 +139,7 @@ describe('克莱门莎 S2 风暴潮: the 漩涡 is the client\'s own field (FX_B
     w.tick();
     assert.equal(h.b.time < 1, true, 'the battle has just started');
     // S2's own loop is already the skill's plan row (index.json: clemnt_s2[switch_mode] on the caster)
-    assert.deepEqual(skillPlan(INDEX, HER, SKILL, { rec: RECORD }).loop.map((e) => e.key), [VORTEX]);
+    assert.deepEqual(skillPlan(INDEX, HER, SKILL, { rec: RECORD }).loop.map((e) => e.key), [AURA]);
     assert.equal(cast(), true, 'she casts S2');
     for (let i = 0; i < 90; i++) frame();   // 3 s at 30 fps: the cabin's 3 tiles at speed 2
     // the skill's own aura (the plan's loop, on her) and the vortex (the kit's 'tide', on the ground): the decal is ours
@@ -148,7 +151,7 @@ describe('克莱门莎 S2 风暴潮: the 漩涡 is the client\'s own field (FX_B
     const vortex = decals()[0];
     assert.equal(vortex.opts.loop, true, 'a looping field, held');
     assert.equal(vortex.stopped, false, 'still held while the skill lasts');
-    assert.ok(spawned.some((x) => x.key === VORTEX && !x.opts.decal), 'her S2 aura (the plan\'s loop) plays too');
+    assert.ok(spawned.some((x) => x.key === AURA && !x.opts.decal), 'her S2 aura (the plan\'s loop) plays too');
     // the field is the vortex's own tile: the same fx one tile further right lands one tile further right
     const before = vortex.place.pos.slice(0, 2);
     assert.equal(w.simFx('tide', 9, 10, { r: 1.5, dur: 5, id: her.id }), true, 'the same fx one tile further');

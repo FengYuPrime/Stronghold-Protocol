@@ -668,6 +668,7 @@ export function planUses(idx, plan, uses, opts = {}) {
     return a;
   };
   const eachHit = [];
+  const seq = new Map();   // entry → the order its use came in (dedupePlan: the first use of an effect wins)
   const miss = (key, role, reason, u) => { plan.unmapped.push({ key, role, reason, from: u.from }); };
 
   // an enemy skill held in several modes (index v2): its copies' uses name their `mode` — the plan of `opts.mode`
@@ -698,6 +699,8 @@ export function planUses(idx, plan, uses, opts = {}) {
         if (u.dirBy === 'name') for (const s of new Set(e.slots || [])) if (s && s !== key) miss(s, role, placed, u);
         // a tick of the owner's buff plays on the owner, the others on what they hit
         if (PULSE.has(placed)) plan.pulse.push({ ...e, at: placed === 'tick' && e.on !== 'targets' ? 'owner' : 'target', hold: oneShotHold(e), reason: placed });
+      } else {
+        seq.set(e, seq.size + 1);
       }
     }
   }
@@ -730,6 +733,7 @@ export function planUses(idx, plan, uses, opts = {}) {
     });
   }
   plan.each.hit = [eachHit];
+  dedupePlan(plan, seq);
   return plan;
 }
 
@@ -843,6 +847,57 @@ function place(plan, e, u, { attackOf, eachHit }) {
   if (role === 'end') { e.hold = oneShotHold(e); plan.end.push(e); return null; }
   if (role === 'range') { e.hold = e.loop ? 'skill' : null; plan.range.push(e); return null; }
   return 'other';
+}
+
+/**
+ * Every list of a plan an entry plays from once (dedupePlan's walk). Not walked: `unmapped` (reasons, not entries), the
+ * hit groups (`attacks[].hit` / `each.hit`: a group is one hit, and the same key twice is two hits of it) and `cond` (the
+ * same buff key belongs to several states of the client's condition graph, so its uses repeat there).
+ */
+function entryLists(plan) {
+  const lists = [plan.ready, plan.start, plan.loop, plan.end, plan.range, plan.trigger, plan.targets, plan.each?.cast, plan.pulse];
+  for (const a of Array.isArray(plan.attacks) ? plan.attacks : []) {
+    if (!isObj(a)) continue;
+    lists.push(a.cast, a.range, a.aim);
+  }
+  return lists.filter(Array.isArray);
+}
+
+/** What makes two plan entries the same effect: its key, role, where it sits and how long it is held. */
+const entrySig = (e) => [e.key, e.role, e.at ?? '', e.point ?? '', e.follow ?? '', e.hold ?? '', e.loop ? 1 : 0].join('\u0001');
+
+/**
+ * One effect, one entry: drop the entries that repeat one already placed — the same key in the same role at the same
+ * point, held the same way. index.json writes an effect once per ability node that emits it (锡人 S2's
+ * `tinman_skill_02_start_03` / `_04` sit under both `HitTile`, a ProjectileToTileAbility, and `HitEnemy`, a RangedAttack:
+ * the skill-level start row and the attack's cast row), and both copies played on one cast. The first use wins (`seq`,
+ * the use order; else the plan's list order). An entry whose role, point, mount point or hold differs is another effect
+ * of that key and stays (one key can loop and be cast; a prefab can be held for the skill and for a cast), and so does a
+ * key a path / tile field or an unknown event places (`unmapped` is not touched; a hit group's rows and `cond` are not
+ * walked). A single entry object listed twice (the same row spread into several lists) is left alone.
+ * @param {ReturnType<typeof emptyPlan>} plan
+ * @param {Map<any, number>} [seq]  entry → its use's order
+ */
+function dedupePlan(plan, seq = null) {
+  const rank = (e) => (seq && seq.has(e) ? seq.get(e) : Infinity);
+  const keep = new Map();   // signature → the entry kept
+  const lists = entryLists(plan);
+  for (const list of lists) {
+    for (const e of list) {
+      if (!isObj(e) || typeof e.key !== 'string') continue;
+      const sig = entrySig(e);
+      const first = keep.get(sig);
+      if (first === undefined || (first !== e && rank(e) < rank(first))) keep.set(sig, e);
+    }
+  }
+  for (const list of lists) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const e = list[i];
+      if (!isObj(e) || typeof e.key !== 'string') continue;
+      if (keep.get(entrySig(e)) !== e) list.splice(i, 1);
+    }
+  }
+  return plan;
 }
 
 /**
@@ -1275,13 +1330,13 @@ export const FX_BINDINGS = Object.freeze({
   // field, not a hit. index.json's skchr_clemnt_2 lists one effect only, the S2 loop clemnt_skill_02_buff_01 (a spinning
   // water / wind field: the plane background, flow, spiral, wind trail, bubbles), attached to the buff clemnt_s2[switch_mode]
   // on the caster — the plan already plays it on her for the skill's duration (`hold: 'skill'`). Nothing played it where the
-  // vortex stands, so the kit's 'tide' fell back to the procedural zone (render/fx/kinds.js `tide`). The binding plays the
-  // same official field on that tile as a ground decal (outside the effects budget: MAX_EFFECTS, system.js) for the fx's own
-  // `dur`, so it leaves with the skill [ASSUMED: the extraction holds no separate ground-vortex prefab for her — the client's
-  // S2 bundle has five more keys our used-set does not export (clemnt_skill_02_bullet_01 / _02, _bullet_range_01, _mark_02,
-  // _mark_enemy), so the field's official key cannot be read here; see the report notes]
+  // vortex stands, so the kit's 'tide' fell back to the procedural zone (render/fx/kinds.js `tide`). The ground copy therefore
+  // plays the client's own landing field — clemnt_skill_02_bullet_range_01 (44 nodes / 36 particle systems, looping, spawn 7 =
+  // the struck tile) — as a ground decal (outside the effects budget: MAX_EFFECTS, system.js) for the fx's own `dur`, so it
+  // leaves with the skill. (The other four S2 keys are exported too: _bullet_01/_02 are the cabin's flight, _mark_02/_mark_enemy
+  // the small marks — see EXTRA_COVERAGE_KEYS in tools/local-extract/fx.py.)
   skchr_clemnt_2: Object.freeze({
-    tide: binding({ owner: 'id', keys: ['clemnt_skill_02_buff_01'], at: 'point', hold: 'fx', holdS: 15, decal: true }),
+    tide: binding({ owner: 'id', keys: ['clemnt_skill_02_bullet_range_01'], at: 'point', hold: 'fx', holdS: 15, decal: true }),
   }),
   // 锡人 S1 / S2 (chess_char_2_19-tinman.js: the 'zone' on the struck tile, id = him, dur = the area's time): the client's
   // flask (projectile_chr_tinman_s1 / _s2) lands there — its reached effects are the ring (tinman_skill_0N_range_01,
