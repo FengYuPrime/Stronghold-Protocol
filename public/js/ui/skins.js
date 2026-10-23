@@ -70,6 +70,31 @@ export function clearSkin(chessId) {
 /** The skin this browser picked for a chess, or null. Also the renderer's lookup for a piece without an own choice. */
 export const skinFor = (chessId) => (chessId ? skinsStore.get().entries[chessId] || null : null);
 
+/**
+ * The outfit a summon piece wears (换装 召唤物, docs/SKINS.md "召唤物"): its owner piece's (`ownerUid`) — resolved the
+ * way the owner piece itself is resolved, since the summon is drawn from the same prep state: the server piece's own
+ * `skin` (a teammate's board, a committed placement), else this browser's choice for the base chess / for the 自选
+ * slot's operator.
+ *
+ * Why it must be explicit: the battle carries the outfit on the summon's own UnitInfo (server/sim/battle/players.js
+ * `_makeAlly`, inherited from the owner), but the prep board / 整备区 / 临时整备区 are pieces of m.private, and a piece
+ * view carries a skin for chess pieces only (server/match/player/views.js pieceView). A summon the environment ships
+ * only as an outfit variant then drew that outfit's model whatever its owner wore — 浊心斯卡蒂's 海嗣 on 红女爵 drew
+ * the 升华 summon (user report).
+ * @param {object} piece a piece of m.private (kind 'token', ownerUid)
+ * @param {Map<number, object>} pieces uid → piece of the same prep state
+ * @param {{ chess?: (id: string) => any, diy?: Record<string, { charId?: string }> }} [lookups]
+ * @returns {string|null} the owner's outfit, or null (no owner in this state / the owner wears none)
+ */
+export function summonSkinOf(piece, pieces, lookups = {}) {
+  if (!piece || piece.kind !== 'token' || !Number.isInteger(piece.ownerUid)) return null;
+  const owner = pieces && typeof pieces.get === 'function' ? pieces.get(piece.ownerUid) : null;
+  if (!owner || owner.kind !== 'chess') return null;
+  const chess = typeof lookups.chess === 'function' ? lookups.chess(owner.id) : null;
+  const pick = chess && chess.isDiy && lookups.diy ? lookups.diy[chess.baseId || chess.chessId] || null : null;
+  return owner.skin || skinFor(chess?.baseId || owner.id) || skinFor(owner.id) || (pick ? skinFor(pick.charId) : null) || null;
+}
+
 /** How many outfits are chosen (the 干员调配 header count). */
 export const skinCount = () => Object.keys(skinsStore.get().entries).length;
 

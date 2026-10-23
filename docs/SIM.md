@@ -1142,7 +1142,9 @@ Element conventions of the kits (user playtest #5 #3; official term dictionary: 
   `hit` handler (priority −1000, after any cancel), so its 凋亡 lands (and may burst) before the damage; a hit dodged or
   absorbed after that still carried it [ASSUMED].
 - **盟约·辅助干员 迭代元素** (kits/ops/chess_char_1_15-pithst.js `pithst`): every damage she deals (HP damage > 0; "造成伤害时") attaches `ep_damage_ratio
-  × ATK` of 神经, then 灼燃, then 凋亡 (`PITHST_ELEMENTS`); the element applied first bursts, so alone she bursts 神经.
+  × ATK` of 神经, then 灼燃, 凋亡 and 侵蚀 (`PITHST_ELEMENTS`); the element applied first bursts, so alone she bursts
+  神经. 侵蚀 (`erosion`, the WATER element) is this fork's deliberate addition to the official three-element talent
+  (the owner's decision).
 
 ### 7.3 SkillSpec schema
 

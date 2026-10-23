@@ -11,7 +11,8 @@
 // reinforcement …) are kept and built upon.
 //
 // Simplifications (one line per id; see also the report of the content phase):
-//  1_15 盟约·辅助干员  every damage she deals attaches all three elements, neural → burn → apoptosis (see pithst).
+//  1_15 盟约·辅助干员  every damage she deals attaches all four elements, neural → burn → apoptosis → erosion (WATER;
+//                the fourth is this fork's deliberate addition — see pithst).
 //  6_01 蕾缪安   locks every 0.5 s while an enemy is in range (ends early — and bombs — when the range empties);
 //                the shells then follow one every 0.3 s (PRTS), each landing 0.3 s after it is fired [ASSUMED flight];
 //                the 1.5 radius (PRTS "碰撞箱判定") takes an enemy whose 0.1 collider overlaps it

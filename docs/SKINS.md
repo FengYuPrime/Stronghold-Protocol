@@ -93,8 +93,21 @@ chars[owner].skins[skinId].tokens[tokenId] = { tokenSkinId, spine }   // spine �
   上游素材，两者并不冲突。
 
 渲染（`public/js/assets.js`）：`spineEntry(tokenId, { skin })` 的 token 分支先问 `tokenSkinSpine()`（按
-`tokens[tokenId].owner` → `chars[owner].skins[skin].tokens[tokenId]`），命中即用该模型，并把 token 自己的模型
-（本地提取优先 → 上游 `spine`）记成 `fallback`；没命中（多数皮肤、模型没装、token 无 owner）就还是 token 自己的模型。
+`tokens[tokenId].owner` → `chars[owner].skins[skin].tokens[tokenId]`；**owner 为 null 时改用皮肤 id 自带的干员前缀**
+——池外干员的召唤物 `owner` 是 null，但皮肤 id 本身就是 `char_003_kalts@boc#6` 这种形式、`chars` 也按它分组，
+2026-10 的数据里这样救回 43 对），命中即用该模型，并把 token 自己的模型（本地提取优先 → 上游 `spine`）记成
+`fallback`；没命中（多数皮肤、模型没装、token 无 owner）就还是 token 自己的模型。
+
+**每个画到召唤物的入口都必须把 skin 递下去**，少一个就静默画成另一套：
+
+- 战斗：`snapshot.unitInfo.skin`（sim 由召唤者继承，见下）；
+- 备战棋盘 / 整备区 / 临时整备区：`m.private` 的棋子来自 `pieceView()`，而它**只给 chess 棋子**写 skin —— 召唤物
+  棋子的皮肤由 `render/app.js pieceInfo()` 用 `ownerUid` 找主人棋子、按 `ui/skins.js summonSkinOf()` 解析（服务端
+  给的 `piece.skin` 优先，其次本机的 `skinFor(baseId | 自选干员 charId)`）；
+- 反例（2026-10 实测 bug）：`pieceInfo` 的 token 分支没有递 skin，`spineEntry` 退回 `tokens[id].spine`；而海嗣这类
+  上游只提供**变体**模型的召唤物，`tokens[id].spine` 本身就是某套皮肤的模型（`…_boc_4` = 升华），于是穿红女爵
+  画出来的是升华那套的召唤物。
+
 sim 只是把皮肤 id 透传：`Unit.skin` 由召唤者继承（`_makeAlly` 与棋盘上「先列 token 后列主人」的 late 链接两条路径），
 `snapshot.unitInfo.skin` 因此带上 —— 纯展示字段，不影响确定性；没有皮肤的对局 `skin` 仍是 `undefined`（JSON 丢弃），
 线格式逐字节不变。

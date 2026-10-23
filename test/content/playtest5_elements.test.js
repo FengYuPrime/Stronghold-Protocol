@@ -38,8 +38,8 @@ const PITH = 'chess_char_1_15_a', PITH_B = 'chess_char_1_15_b';
 // ---------------------------------------------------------------------------------------------------------------------
 // 盟约·辅助干员
 
-test('#3 盟约·辅助干员: each damage attaches 18 % ATK of 神经, 灼燃 and 凋亡 (in that order); alone, 神经 bursts', () => {
-  assert.deepEqual([...PITHST_ELEMENTS], ['neural', 'burn', 'apoptosis']);
+test('#3 盟约·辅助干员: each damage attaches 18 % ATK of 神经, 灼燃, 凋亡 and 侵蚀 (in that order); alone, 神经 bursts', () => {
+  assert.deepEqual([...PITHST_ELEMENTS], ['neural', 'burn', 'apoptosis', 'erosion']);
   const h = battle({ units: [{ chessId: PITH, row: 10, col: 4 }], enemies: [{ key: 'enemy_w3a', pos: [10, 5] }] });
   const u = h.unit(PITH);
   h.step();
@@ -47,30 +47,32 @@ test('#3 盟约·辅助干员: each damage attaches 18 % ATK of 神经, 灼燃 a
   const r = tal(PITH).ep_damage_ratio;
   assert.ok(h.runUntil(() => e.elem.neural > 0, 5), 'first hit');
   for (const el of PITHST_ELEMENTS) approx(e.elem[el], u.s.atk * r, `${el} = 18 % ATK`);
-  // the three gauges fill together; 神经 is applied first, so it is the one that bursts (PRTS 元素)
+  // the four gauges fill together; 神经 is applied first, so it is the one that bursts (PRTS 元素)
   assert.ok(h.runUntil(() => h.hooksOf('elementBurst').length > 0, 40), 'a burst');
   assert.equal(h.hooksOf('elementBurst')[0].element, 'neural');
-  assert.equal(h.hooksOf('elementBurst').length, 1, 'the burst locks the other two');
+  assert.equal(h.hooksOf('elementBurst').length, 1, 'the burst locks the other three');
   checkInvariants(h.b);
 });
 
-test('#3 盟约·辅助干员: her 灼燃 / 凋亡 complete the gauges her team builds (was: 神经 only)', () => {
-  for (const el of ['burn', 'apoptosis']) {
+test('#3 盟约·辅助干员: her 灼燃 / 凋亡 / 侵蚀 complete the gauges her team builds (was: 神经 only)', () => {
+  for (const el of ['burn', 'apoptosis', 'erosion']) {
     const h = battle({ units: [{ chessId: PITH, row: 10, col: 4 }], enemies: [{ key: 'enemy_w3a', pos: [10, 8] }] });
     const u = h.unit(PITH);
     h.step();
     const e = h.enemy('enemy_w3a');
     for (const k of Object.keys(e.elem)) e.elem[k] = 0;
-    e.elem[el] = 950; // e.g. 余's burn / 塑心's apoptosis so far
+    e.elem[el] = 950; // e.g. 余's burn / 塑心's apoptosis / an enemy's erosion so far
     h.b.dealDamage(u, e, { amount: 100, type: 'arts', canDodge: false });
     const b = h.hooksOf('elementBurst').filter((c) => c.target === e);
     assert.equal(b.length, 1, `${el} burst`);
     assert.equal(b[0].element, el);
     const one = u.s.atk * tal(PITH).ep_damage_ratio;
-    approx(e.elem.neural, one, '神经 filled first');
-    // 灼燃 comes before 凋亡: it fills when 凋亡 bursts; the burst locks 凋亡 when 灼燃 bursts
-    if (el === 'apoptosis') approx(e.elem.burn, one, '灼燃 before the 凋亡 burst');
-    else assert.equal(e.elem.apoptosis, 0, 'the burst locks the element after it');
+    // every element applied before the bursting one has filled; the burst locks every element after it
+    const at = PITHST_ELEMENTS.indexOf(el);
+    for (const [i, k] of PITHST_ELEMENTS.entries()) {
+      if (i < at) approx(e.elem[k], one, `${k} before the ${el} burst`);
+      else if (i > at) assert.equal(e.elem[k], 0, `the burst locks ${k}`);
+    }
   }
 });
 
@@ -85,7 +87,7 @@ test('#3 盟约·辅助干员 "造成伤害时": a dodged or fully absorbed hit 
     const atk0 = u.stats.attacks;
     h.run(6);
     assert.ok(u.stats.attacks >= atk0 + 2, 'she attacked');
-    assert.equal(e.elem.neural + e.elem.burn + e.elem.apoptosis, 0, `${guard.key}: nothing attached`);
+    assert.equal(e.elem.neural + e.elem.burn + e.elem.apoptosis + e.elem.erosion, 0, `${guard.key}: nothing attached`);
   }
   const h = battle({ units: [{ chessId: PITH, row: 10, col: 4 }], enemies: [{ key: 'enemy_w3a', pos: [10, 8] }] });
   const u = h.unit(PITH);

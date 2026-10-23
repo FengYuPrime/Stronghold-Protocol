@@ -213,20 +213,29 @@ export function spineEntry(m, id, opts) {
  *
  * The map lives on the owner's outfit entry — `chars[owner].skins[skinId].tokens[tokenId] = { tokenSkinId, spine }`
  * (tools/skins.mjs inject writes it, only for the models really on disk) — because the outfit, not the token, is what
- * the player picks. `tokenId` finds the owner (`tokens[tokenId].owner`); a token id the manifest does not list, an
- * outfit that swaps no token (most) and an outfit whose model is not installed all give null, and the caller keeps the
- * token's own model.
+ * the player picks. `tokenId` finds the owner (`tokens[tokenId].owner`, tools/assets/plan.mjs tokenSkinOwners); a token
+ * id the manifest does not list, an outfit that swaps no token (most) and an outfit whose model is not installed all
+ * give null, and the caller keeps the token's own model.
+ *
+ * The owner is also read out of the outfit's own id when the manifest attributes the summon to nobody: an outfit is
+ * named after its operator (`char_003_kalts@boc#6`) and `chars` is keyed by exactly that, so the outfit still resolves
+ * for the summons the plan's operator list did not hold while tools/skins.mjs inject wrote their outfit anyway
+ * (43 pairs in the 2026-10 data — 凯尔希's Mon3tr, 令's three souls, 深靛's … — whose `tokens[id].owner` is null).
  * @param {object} m the manifest @param {string} tokenId @param {string} skinId the owner's outfit
  * @returns {object|null} a Spine entry (`validSpine` rules)
  */
 export function tokenSkinSpine(m, tokenId, skinId) {
   const t = str(tokenId), s = str(skinId);
   if (!t || !s) return null;
-  const owner = str(get(get(get(m, 'tokens'), t), 'owner'));
-  const rec = owner ? get(get(get(get(m, 'chars'), owner), 'skins'), s) : null;
-  const mapped = rec ? get(get(rec, 'tokens'), t) : null;
-  const sp = isObj(mapped) && isObj(mapped.spine) ? mapped.spine : mapped;
-  return validSpine(sp) ? sp : null;
+  for (const owner of [str(get(get(get(m, 'tokens'), t), 'owner')), str(s.split('@')[0])]) {
+    if (!owner) continue;
+    const skins = get(get(get(m, 'chars'), owner), 'skins');
+    const mapped = skins ? get(skins, s) : null;
+    const tk = mapped ? get(get(mapped, 'tokens'), t) : null;
+    const sp = isObj(tk) && isObj(tk.spine) ? tk.spine : tk;
+    if (validSpine(sp)) return sp;
+  }
+  return null;
 }
 
 const localSpines = new WeakMap(); // spineLocal record → { local, web, entry } (one entry object per manifest pair)

@@ -166,7 +166,7 @@ import { renderInfo, FORCED_EXIT, showsDeathFx } from './app/info.js';
 import { resolveAssets, makeData, withTimeout, QUALITY_RES, BOARD_RES, releaseGl } from './app/host.js';
 import { t } from '../../../shared/i18n.js';
 // 换装 (干员皮肤): this browser's own outfit choices — the prep view of a piece carries no skin from the server
-import { skinFor } from '../ui/skins.js';
+import { skinFor, summonSkinOf } from '../ui/skins.js';
 
 export { ensurePixi } from './app/pixi.js';
 
@@ -346,6 +346,8 @@ export async function createFieldView(host, options = {}) {
   let ownPen = null;          // the own m.private.nextEnemies (fallback composition of a scouted teammate's pen)
   let standInList = [];       // the own m.private.standIns (0.2.0 补位): pieces of these chess draw the stand-in
   let diyPicks = {};          // the own m.private.diy (0.2.0 自选编队): pieces of these DIY slots draw the operator
+  // uid → piece of the prep state being built (setPrep): a summon piece's outfit is its owner's (pieceInfo, 召唤物换装)
+  let prepByUid = new Map();
   let camBeforePen = null;    // { kind, opts } the camera the pen returns to
   let leader = null;          // { key, view, stand, area } the round leader standing on the boss field in the prep (setLeader)
   let leaderHidden = true;    // shown only by the boss-field prep camera (leaderShown)
@@ -760,7 +762,14 @@ export async function createFieldView(host, options = {}) {
     }
     if (kind === 'token') {
       const rec = data.token(piece.id);
-      return { kind: 'token', side: 'ally', defId: piece.id, spine: rec?.assets?.spine || piece.id, avatar: rec?.assets?.avatar || piece.id, tier: piece.tier || 1, golden: false, dir };
+      // 换装 (召唤物皮肤, docs/SKINS.md "召唤物"): a summon wears its owner's outfit — assets.js spineEntry →
+      // tokenSkinSpine picks the model the outfit's official tokenSkinMap names. The server's piece view carries a
+      // skin for chess pieces only (server/match/player/views.js pieceView), so resolve the owner piece's outfit here,
+      // exactly as this function resolves it for the owner itself. Without it the summon draws its own model — and for
+      // a summon the mirror ships only as an outfit variant that is ANOTHER outfit's model (浊心斯卡蒂's 海嗣 is
+      // `tokens…spine = …_boc_4`, 升华: wearing 红女爵 drew the 升华 summon — user report).
+      const skin = piece.skin ?? summonerSkin(piece);
+      return { kind: 'token', side: 'ally', defId: piece.id, spine: rec?.assets?.spine || piece.id, avatar: rec?.assets?.avatar || piece.id, tier: piece.tier || 1, golden: false, dir, skin };
     }
     const chess = data.chess(piece.id);
     // 0.2.0 补位: a piece of a chess the player does not own (m.private.standIns) is its stand-in's model, in the hand,
@@ -783,6 +792,15 @@ export async function createFieldView(host, options = {}) {
       ...(si ? { standInFor: si.standInFor } : null),
       ...(dr ? { diy: { charId: pick.charId, skillIndex: pick.skillIndex ?? null, uniEquipId: pick.uniEquipId ?? null } } : null),
     };
+  }
+
+  /**
+   * The outfit a summon piece wears (换装 召唤物, docs/SKINS.md "召唤物"): its owner piece's, resolved by ui/skins.js
+   * `summonSkinOf` — the same rule pieceInfo applies to the owner piece itself a few lines above. null when the owner is
+   * not in this prep state (a summon without a placed owner), and then the summon keeps its own model.
+   */
+  function summonerSkin(piece) {
+    return summonSkinOf(piece, prepByUid, { chess: (id) => data.chess(id), diy: diyPicks });
   }
 
   /** Board-space direction → the direction drawn (mirrored on the right half of the Final Assault prep). */
@@ -837,6 +855,8 @@ export async function createFieldView(host, options = {}) {
     addList(src.hand, 'hand');
     addList(src.temp, 'temp');
     addList(src.board, 'board');
+    // a summon piece's outfit is its owner piece's, wherever that piece stands (hand, 临时整备区, board): pieceInfo
+    prepByUid = new Map(list.map((e) => [e.uid, e.piece]));
     const seen = new Set();
     const prevBoard = new Set(prepPieces.filter((p) => p.area === 'board').map((p) => p.uid));
     // where each piece stood in the last state of this prep (nothing after a battle rebuilt the scene): a piece this state
