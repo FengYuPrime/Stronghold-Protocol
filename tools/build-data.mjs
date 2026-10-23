@@ -783,6 +783,29 @@ function buildTalents(ctx, char, phase, level, moduleParts, label, modPhase = ph
     moduleTalentChanges(ctx, moduleParts, modPhase, modLevel, label, potRank));
 }
 
+/**
+ * Talent text this fork adds to an official talent's wording (the owner's decision: 盟约·辅助干员 also deals
+ * 侵蚀 (WATER) damage, see `server/sim/content/kits/ops/chess_char_1_15-pithst.js` PITHST_ELEMENTS). The official
+ * `character_table.json` still lists three elements, so the wording is patched here rather than in the table —
+ * keyed by charId, then talent index, as [from, to] replacement pairs for `desc` and `descRaw`.
+ */
+const TALENT_TEXT_DEVIATIONS = Object.freeze({
+  char_616_pithst: Object.freeze({
+    0: Object.freeze({
+      desc: Object.freeze([['、灼燃损伤、凋亡损伤；', '、灼燃损伤、凋亡损伤、侵蚀损伤；']]),
+      descRaw: Object.freeze([['<$ba.dt.apoptosis2>凋亡损伤</>；', '<$ba.dt.apoptosis2>凋亡损伤</>、<$ba.dt.erosion2>侵蚀损伤</>；']]),
+    }),
+  }),
+});
+
+/** Apply `TALENT_TEXT_DEVIATIONS` to one talent's { desc, descRaw } (a no-op when the character has none). */
+function deviateTalentText(charId, index, text) {
+  const dev = TALENT_TEXT_DEVIATIONS[charId]?.[index];
+  if (!dev) return text;
+  const apply = (value, pairs) => (pairs || []).reduce((s, [from, to]) => s.split(from).join(to), value);
+  return { desc: apply(text.desc, dev.desc), descRaw: apply(text.descRaw, dev.descRaw) };
+}
+
 /** The character's own talents at (phase, level, potential rank), unfiltered (no module). */
 function baseTalentList(ctx, char, phase, level, label, potRank = 0) {
   const talents = [];
@@ -790,7 +813,8 @@ function baseTalentList(ctx, char, phase, level, label, potRank = 0) {
     const c = bestCandidate(t.candidates, phase, level, potRank);
     if (!c) return;
     const { bb, bbStr } = flattenBB(c.blackboard, `${label} talent ${index}`);
-    const { desc, descRaw } = textPair(c.description, bb, bbStr);
+    let { desc, descRaw } = textPair(c.description, bb, bbStr);
+    ({ desc, descRaw } = deviateTalentText(char.charId, index, { desc, descRaw }));
     talents.push({
       index, name: c.name || null, desc, descRaw, bb, bbStr,
       rangeGrid: rangeGrid(ctx, c.rangeId), tokenKey: c.tokenKey || null,
