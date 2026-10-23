@@ -219,7 +219,8 @@ export default function register(api) {
       st = v ? { id: v.battleId ?? null, field: v.fieldId ?? null, kind: v.kind ?? null, auth: !!v.authoritative, done: !!v.done } : null;
     } catch (e) { st = `err:${e && e.message}`; }
     const phase = (() => { try { return api.store?.get?.()?.match?.public?.phase ?? null; } catch { return null; } })();
-    api.log?.(`tick diag: phase=${phase} rowsSeen=${rowTicks} runner=${!!r} entries=${entries} fields=${JSON.stringify(allFieldIds(api))} raw=${JSON.stringify(raw)} sample=${JSON.stringify(sample)} state=${JSON.stringify(st)}`);
+    // 诊断心跳：只在浏览器里设了 window.__SP_DEBUG_PLUGINS__ = true 时才打（否则每 3 秒一条噪声日志）
+    if (globalThis.__SP_DEBUG_PLUGINS__) api.log?.(`tick diag: phase=${phase} rowsSeen=${rowTicks} runner=${!!r} entries=${entries} fields=${JSON.stringify(allFieldIds(api))} raw=${JSON.stringify(raw)} sample=${JSON.stringify(sample)} state=${JSON.stringify(st)}`);
   };
 
   const tick = () => {

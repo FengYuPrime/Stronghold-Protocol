@@ -665,10 +665,22 @@ export class DataSource {
    */
   getDiy(id, pick, potential = null) {
     const pot = isPotential(potential) ? potential : POTENTIAL_DEFAULT;
-    const key = `${id}|diy|${pick?.charId ?? ''}|${pick?.skillIndex ?? ''}|${pick?.uniEquipId ?? ''}|p${pot}`;
+    const key = `${id}|diy|${pick?.charId ?? ''}|${pick?.skillIndex ?? ''}|${pick?.uniEquipId ?? ''}|${pick?.slotId ?? ''}|p${pot}`;
     if (this._chess.has(key)) return this._chess.get(key);
     const r = this.rawChess(id);
-    const rec = r && r.isDiy ? diyRecordOf(r, pick, this, { potential: pot }) : null;
+    // A dev-only 自选 slot (the debugger's g.devGive, server/match/player/dev.js): the id itself is not in the data, so
+    // the pick names the official slot it borrows its identity (tier, price, status) and pick rules from — an ordinary
+    // pick has no `slotId` and takes exactly the path above.
+    let rec = r && r.isDiy ? diyRecordOf(r, pick, this, { potential: pot }) : null;
+    if (!rec && pick && typeof pick.slotId === 'string') {
+      const elite = /_b$/.test(id);
+      const tpl = this.rawChess(elite ? String(pick.slotId).replace(/_a$/, '_b') : pick.slotId);
+      if (tpl && tpl.isDiy) {
+        rec = diyRecordOf({
+          ...tpl, chessId: id, baseId: id.replace(/_b$/, '_a'), goldenId: id.replace(/_a$/, '_b'), isGolden: elite, checkSlotId: tpl.chessId,
+        }, pick, this, { potential: pot });
+      }
+    }
     let d = null;
     if (rec) {
       d = normalizeChess({ ...rec, chessId: id });

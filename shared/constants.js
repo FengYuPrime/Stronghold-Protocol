@@ -195,6 +195,11 @@ export const ERR = Object.freeze({
   // 对局人数上限 (server/lobby.js Lobby.start, env SP_MAX_MATCH_PLAYERS): as many humans are already in running matches,
   // so this room cannot start one (the hall itself is never limited — only entering a match is)
   SERVER_FULL: 'SERVER_FULL',
+  // 调试 (SP_DEV=1, g.devGive): the dev-only refusal of a 自选 / 替补 operator — one the data cannot field at all (no
+  // 自选 slot composes a record for it) and one whose operator has no kit yet (the sim cannot field it: the same list
+  // setDiy checks). Specific codes so the debugger's panel can say why, instead of a plain BAD_TARGET.
+  DEV_NO_SLOT: 'DEV_NO_SLOT',
+  DEV_NO_KIT: 'DEV_NO_KIT',
   INTERNAL: 'INTERNAL',
 });
 
@@ -206,6 +211,8 @@ export const ERR_TEXT = {
   BAD_TILE: N_('无法部署在该位置'), BAD_TARGET: N_('无效的目标'), SOLD_OUT: N_('已售出'), MAX_LEVEL: N_('调度中心已达最高等级'),
   NOT_YOUR_TURN: N_('尚未轮到你'), ALREADY: N_('已完成该操作'), TEMP_NOT_EMPTY: N_('临时整备区不为空'), ELIMINATED: N_('你已被淘汰'),
   SPECTATOR: N_('观战中无法进行该操作'), INTERNAL: N_('服务器内部错误'),
+  // 调试 g.devGive (SP_DEV=1): the same words the debugger's panel greys the row with (ui/devGiveModel.js)
+  DEV_NO_SLOT: N_('数据里没有可作为棋子的形态'), DEV_NO_KIT: N_('尚未实装技能组（kit）'),
   PLUGIN_UNKNOWN: N_('本服务器没有安装该插件'), PLUGIN_BLOCKED: N_('该插件不能在房间中启用'), PLUGIN_DEPENDENCY: N_('缺少该插件需要的其他插件'),
   PLUGIN_CONFLICT: N_('所选插件互相冲突'), PLUGIN_LIMIT: N_('所选插件的素材总量超出本服务器的上限'),
   PLUGIN_INCOMPATIBLE: N_('该插件不适配本服务器的游戏版本'), PLUGIN_BUSY: N_('本服务器同时运行的插件组合已达上限，请稍后再试'),

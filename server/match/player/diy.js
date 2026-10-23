@@ -215,25 +215,26 @@ export class PlayerDiy {
   /**
    * The stock entries this player's ordinary shop draws from now ([baseId, entry] with copies left and the 调度中心 at
    * the slot's shopLevel), or null (none — the shared pool's roll alone, exactly as without picks). The promotion
-   * reward does not use this gate (`diyStockEntries`).
+   * reward does not use this gate (`diyStockEntries`). A dev-only slot (g.devGive's `dev` stock, player/dev.js) is never
+   * listed: the official shop stays the four 自选 slots of data/backups.json `diy.slots`.
    * @returns {Array<[string, { cap: number, left: number, tier: number, shopLevel: number }]> | null}
    */
   diyRollEntries() {
     if (!this.diyStock || !this.diyStock.entries.size) return null;
     const out = [];
-    for (const [id, e] of this.diyStock.entries) if (e.left > 0 && this.shop.level >= e.shopLevel) out.push([id, e]);
+    for (const [id, e] of this.diyStock.entries) if (!e.dev && e.left > 0 && this.shop.level >= e.shopLevel) out.push([id, e]);
     return out.length ? out : null;
   }
 
   /**
    * The stock entries a random grant, and the promotion reward's temporary refresh, draw besides the shared pool
    * (see the header): every slotted piece with copies left, whatever the 调度中心 level (the roll's own tier rules
-   * apply), or null (none).
+   * apply), or null (none). Dev-only slots (g.devGive) stay out, like in `diyRollEntries`.
    * @returns {Array<[string, { cap: number, left: number, tier: number, shopLevel: number }]> | null}
    */
   diyStockEntries() {
     if (!this.diyStock || !this.diyStock.entries.size) return null;
-    const out = [...this.diyStock.entries].filter(([, e]) => e.left > 0);
+    const out = [...this.diyStock.entries].filter(([, e]) => !e.dev && e.left > 0);
     return out.length ? out : null;
   }
 

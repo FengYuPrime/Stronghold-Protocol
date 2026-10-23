@@ -140,6 +140,10 @@ export class PlayerRound {
           // 0.2.0 自选编队: a slotted DIY slot fights as its pick (sim getChess(id, { diy }): the operator's body, the pick's
           // skill and module — no loadout fields, docs/SIM.md §12)
           u.diy = { charId: pick.charId, skillIndex: pick.skillIndex, uniEquipId: pick.uniEquipId };
+          // 调试 (g.devGive, SP_DEV=1): a dev-only 自选 slot names the official slot its records come from, so the sim can
+          // compose the operator's def (sim getDiy: pick.slotId) — an official slot's record carries no marker
+          const tpl = this.gd.chess(piece.id)?.diyTemplate;
+          if (typeof tpl === 'string') u.diy.slotId = tpl;
         } else if (this.fieldsStandIn(piece.id)) {
           // 0.2.0 补位: a chess this player does not own fights as its stand-in (sim getChess(id, { standIn: true }): the
           // backup skill / module — no loadout fields, docs/SIM.md §12)
@@ -147,8 +151,11 @@ export class PlayerRound {
         } else {
           // DESIGN §16: the equipped skill / module (elite only) from the loadout (defaults when absent)
           const lo = this.loadoutFor(this.gd.chess(piece.id));
-          u.skillIndex = lo.skillIndex;
-          u.moduleId = lo.moduleId;
+          // 调试 (g.devGive, SP_DEV=1): a piece handed over with an explicit skill / module (piece.meta.dev, checked
+          // against the game data in player/dev.js) keeps it — the ordinary path below is untouched
+          const dev = piece.meta && piece.meta.dev ? piece.meta.dev : null;
+          u.skillIndex = dev && Number.isInteger(dev.skillIndex) ? dev.skillIndex : lo.skillIndex;
+          u.moduleId = dev && typeof dev.moduleId === 'string' ? dev.moduleId : lo.moduleId;
         }
         // 0.2.2: the potential / 练度 of an operator the player owns (the chess as itself, an owned 自选 pick — the player's
         // 干员调配 settings, 潜能 6 / 精英2 Lv.60 by default and for bots; never a stand-in's nor a prototype pick's)

@@ -367,7 +367,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  */
 export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, stats = null, viewerOwner = false, onDevGold = null, onDevLp = null }) {
+  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, stats = null, viewerOwner = false, onDevGold = null, onDevLp = null, onDevGive = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
   const lp = boss && Number.isFinite(pub?.teamLp) ? pub.teamLp : Number.isFinite(priv?.lp) ? priv.lp : null;
@@ -401,6 +401,8 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         ${priv?.dev && onDevGold ? html`<button type="button" class="gtop__dev" data-testid="dev-gold" title=${t('开发调试：+999 资金')} onClick=${onDevGold}>${t('+999 资金')}</button>` : null}
         ${/* 调试 (SP_DEV=1)：点一下扣自己 1 点目标生命值（按住 Shift 扣 99），用来把一局快速推到结算。 */ null}
         ${priv?.dev && onDevLp ? html`<button type="button" class="gtop__dev" data-testid="dev-lp" title="dev: -1 LP (Shift: -99)" onClick=${(e) => onDevLp(e && e.shiftKey ? 99 : 1)}>-1 LP</button>` : null}
+        ${/* 调试 (SP_DEV=1)：打开调试面板，任意干员 / 任意装备直接加入自己（ui/devGive.js，指令 g.devGive）。 */ null}
+        ${priv?.dev && onDevGive ? html`<button type="button" class="gtop__dev" data-testid="dev-give" title=${t('开发调试：任意干员 / 装备加入自己')} onClick=${onDevGive}>${t('调试')}</button>` : null}
         <${UnofficialMark} room=${room} compact=${true} class="gtop__mod" />
       </div>
     </div>

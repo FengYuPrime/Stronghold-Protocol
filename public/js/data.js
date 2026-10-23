@@ -165,6 +165,12 @@ export function createDataStore(opts = {}) {
   /** name → the view `get` shows the file through (setView; the art manifest with the cosmetic plugins) */
   const views = new Map();
   /**
+   * 调试 (g.devGive, SP_DEV=1): `lookup('chess', id)`'s fallback for a dev-only 自选 slot's composed record
+   * (setChessOverlay; null in a formal match). Only `lookup` reads it.
+   * @type {Record<string, any>|null}
+   */
+  let chessOverlay = null;
+  /**
    * The content set the files come from (setContent: `values` name → JSON, `overlay(lang)` → a language's game texts or
    * null), or null: the files at `base`.
    * @type {{ id: string, values: Map<string, any>, overlay: ((lang: string) => Promise<any>) | null, langs: Set<string> } | null}
@@ -396,10 +402,15 @@ export function createDataStore(opts = {}) {
     getRaw: (name) => entries.get(name)?.value ?? null,
     /** 'idle' | 'loading' | 'ready' | 'missing' */
     status: (name) => entries.get(name)?.status ?? 'idle',
-    /** Record by id from a loaded file (null when unknown / not loaded). */
+    /** Record by id from a loaded file (null when unknown / not loaded); an id of the dev chess overlay (setChessOverlay) too. */
     lookup(name, id) {
       if (id == null) return null;
-      return index(name)?.get(String(id)) ?? null;
+      const rec = index(name)?.get(String(id)) ?? null;
+      if (rec) return rec;
+      // 调试 (g.devGive, SP_DEV=1): a dev-only 自选 slot's id is not in data/chess.json — its composed record rides in
+      // m.private.devChess and is shown through this overlay. Only `lookup` sees it: `get` / `list` / `getRaw` keep the
+      // downloaded file, so no formal code path (the shop pools, exports, the roster) ever lists a dev slot.
+      return name === 'chess' && chessOverlay && Object.hasOwn(chessOverlay, String(id)) ? chessOverlay[String(id)] : null;
     },
     /**
      * Record by id from a loaded file exactly as downloaded (its Chinese texts), whatever the locale — what the server
@@ -437,6 +448,19 @@ export function createDataStore(opts = {}) {
       if (typeof fn === 'function') views.set(name, fn);
       else views.delete(name);
       notify(name);
+    },
+    /**
+     * 调试 (g.devGive, SP_DEV=1): the records `lookup('chess', id)` falls back to — a dev-only 自选 slot's composed
+     * operator (`m.private.devChess`; ui/devChess.js builds it, with a local composition as the fallback). `null` clears
+     * it, and a formal match never sets one: `get` / `list` / `getRaw` are untouched, so nothing that lists the game data
+     * (the roster, the shop pools, exports) can see a dev slot.
+     * @param {Record<string, any>|null|undefined} map
+     */
+    setChessOverlay(map) {
+      const next = map && typeof map === 'object' && !Array.isArray(map) ? map : null;
+      if (next === chessOverlay) return;
+      chessOverlay = next;
+      notify('chess');
     },
     /** Called with the file name whenever a file finishes loading (or is invalidated, or the locale changes). */
     subscribe(fn) {

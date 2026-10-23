@@ -199,6 +199,9 @@ export function checkDiyPick(slotId, pick, data) {
  * plus `diyFor` (the slot's base id: the record is a 自选 piece), `charId` (the operator) and, for a prototype pick,
  * `diyProto: true` (no potential, no 练度: shared/potential.js cultivationOf). Null when the pick is not legal for the
  * slot (checkDiyPick) or the data lacks a part.
+ * A synthetic record (the debugger's dev-only 自选 slots, server/match/player/dev.js) carries `checkSlotId` = the
+ * official slot it borrows the pick rules (and the tier) from: every existing record leaves it unset, so nothing about
+ * the official four changes.
  * @param {object} slot a DIY chess record (data/chess.json, `isDiy`)
  * @param {DiyPick} pick
  * @param {DiyData} data
@@ -207,7 +210,7 @@ export function checkDiyPick(slotId, pick, data) {
  */
 export function diyRecordOf(slot, pick, data, { potential = null } = {}) {
   if (!isObj(slot) || !slot.isDiy || typeof slot.chessId !== 'string') return null;
-  const c = checkDiyPick(slot.chessId, pick, data);
+  const c = checkDiyPick(typeof slot.checkSlotId === 'string' ? slot.checkSlotId : slot.chessId, pick, data);
   if (!('ok' in c)) return null;
   const { charId, skillIndex, uniEquipId } = c.pick;
   const backups = backupsOf(data);

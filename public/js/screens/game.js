@@ -100,6 +100,8 @@ import { Underframe, underframeRect, TempRowNotice } from '../ui/underframe.js';
 import { StandInTags } from './game/standInTags.js';
 import { needsFacing, facingIntent, previewGrid, pieceDir, underframeActions, retreatSlot, itemDestroyable } from '../ui/facing.js';
 import { EquipReplaceDialog, replaceRequest, replaceIntent } from '../ui/equipReplace.js';
+import { DevGiveDialog } from '../ui/devGive.js';
+import { devChessKey, devChessOverlay } from '../ui/devChess.js';
 import { pauseAvailable, isPaused, frozenNow } from '../ui/matchStatus.js';
 import { pieceTile } from '../render/drag.js';
 import { FOLD_CAMERA_MS } from '../render/app/tune.js';
@@ -112,7 +114,7 @@ import {
   previewEnemyKey, prepCamera, prepCameraFor, foldCamera, deployFoldsShop, deployFieldOf, fieldTile, panelSide, panelSlots, bondPopupPlace, unitLoadout, deployedRecord,
   mergeTarget, modeOffBonds, readyFundsPrompt, readyShopFold, ownerBandId, ownDiyRecord, ownStandIn, roundStartReplay,
 } from '../ui/gameLogic.js';
-import { toast } from '../ui/toasts.js';
+import { toast, describeError } from '../ui/toasts.js';
 import { BriefingScreen } from './briefing.js';
 import { BandDraftScreen } from './bandDraft.js';
 import { ResultScreen } from './result.js';
@@ -237,6 +239,10 @@ function MatchScreen() {
   const [banner, setBanner] = useState(null);
   const [resultBox, setResultBox] = useState(null);      // the round's result box (ResultDialog), shown at SETTLE
   const [readyBusy, setReadyBusy] = useState(false);
+  // 调试 (SP_DEV=1): the 调试 panel — a Chess/Item picker that hands the player any operator / item (ui/devGive.js,
+  // g.devGive). Only ever opened from the HUD button, which exists only while m.private.dev says the server is in dev mode.
+  const [devGiveOpen, setDevGiveOpen] = useState(false);
+  const [devGiveBusy, setDevGiveBusy] = useState(false);
   const [spBusy, setSpBusy] = useState(null);
   const [personalBusy, setPersonalBusy] = useState(null); // { choiceId, idx }: an older request cannot clear a newer pick
   const [layer, setLayer] = useState('ALL');             // 联防 / 最终攻势 camera: 'L' | 'ALL' | 'R'
@@ -319,6 +325,16 @@ function MatchScreen() {
   // the own pieces' records: a DIY slot the player filled is its 自选 operator (0.2.0, m.private.diy — position, range,
   // name; gameLogic/diy.js), every other chess its data record
   const ownChess = (id) => { const c = gd.chess(id); return ownDiyRecord(c, live.current.priv, { chess: data.get('chess'), backups: data.get('backups') }) || c; };
+  // 调试 (g.devGive, SP_DEV=1): a dev-only 自选 slot (beyond the official four) has an id the game data does not know —
+  // install its composed record as data.lookup's chess overlay (m.private.devChess, plus a local composition fallback,
+  // ui/devChess.js), so the board model, the bench cards, the underframe and the detail card draw the operator like any
+  // other piece. A formal match has no dev pick, the overlay is null and every lookup behaves exactly as before.
+  const devChessSignature = useMemo(() => devChessKey(priv), [priv?.devChess, priv?.diy]);
+  useEffect(() => {
+    const overlay = devChessOverlay(priv?.devChess, priv, { chess: data.get('chess'), backups: data.get('backups') });
+    data.setChessOverlay(overlay);
+    return () => data.setChessOverlay(null);
+  }, [devChessSignature]);
   // what the own pieces show (names and art of the facing wheel, the underframe, the equip-replace dialog): a chess the
   // player does not own is its stand-in (0.2.0 补位 — the owner's recall of the official mode, 2026-10-06); rules keep
   // ownChess (the composed record carries the chess's identity anyway)
@@ -877,6 +893,22 @@ function MatchScreen() {
     net.request('g.devLp', { n })
       .then((res) => toast(`LP ${res && res.lp != null ? res.lp : '?'}`, 'info', { ttl: 1200 }))
       .catch((err) => toast(t('调试失败：{code}', { code: String((err && err.code) || err) }), 'warn'));
+  }, []);
+  // 调试 (SP_DEV=1)：顶栏的「调试」按钮打开面板（ui/devGive.js），选任意干员 / 装备 / 自选（替补）干员 →
+  // g.devGive 直接加入自己（server/match/player/dev.js，走正常的获得路径）。服务端没开 dev 时这条指令被拒
+  // （ERR.BAD_MSG）；DEV_NO_KIT / DEV_NO_SLOT 这类专门错误码经 describeError 显示成具体原因（ERR_TEXT）。
+  const devGiveOpenHandler = useCallback(() => setDevGiveOpen(true), []);
+  const devGiveHandler = useCallback((fields) => {
+    if (!fields) return;
+    setDevGiveBusy(true);
+    // the row's name for the toast: a chess / item record, or a 自选 operator's own unit record (data/backups.json)
+    const name = (fields.kind === 'chess' ? data.lookup('chess', fields.id)?.name
+      : fields.kind === 'item' ? data.lookup('items', fields.id)?.name
+      : data.get('backups')?.units?.[fields.id]?.name) || fields.id;
+    net.request('g.devGive', fields)
+      .then(() => toast(t('调试：已加入「{name}」', { name }), 'info', { ttl: 1200 }))
+      .catch((err) => toast(t('调试失败：{why}', { why: describeError(err) }), 'warn'))
+      .finally(() => setDevGiveBusy(false));
   }, []);
   // 准备 with funds left asks first: the prep's end wipes them (community report #4; not 坎诺特, not at 0 funds, not
   // under AI 托管 — gameLogic.readyFundsPrompt). The button and Space both come here.
@@ -1595,7 +1627,10 @@ function MatchScreen() {
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
         stats=${serverStats}
         viewerOwner=${viewerOwner}
-        onDevGold=${devGoldHandler} onDevLp=${devLpHandler} />
+        onDevGold=${devGoldHandler} onDevLp=${devLpHandler} onDevGive=${devGiveOpenHandler} />
+      ${/* 调试 (SP_DEV=1)：任意干员 / 装备 / 自选（替补）干员加入自己（ui/devGive.js）。非 dev 局 priv.dev 不存在，面板永不出现。 */ null}
+      ${priv?.dev ? html`<${DevGiveDialog} open=${devGiveOpen} chess=${data.get('chess')} items=${data.get('items')}
+        backups=${data.get('backups')} busy=${devGiveBusy} onGive=${devGiveHandler} onClose=${() => setDevGiveOpen(false)} />` : null}
 
       <div class="gm__bonds">
         <button type="button" class="bonds-toggle" aria-expanded=${!bondsCollapsed} aria-controls="match-bond-strip"

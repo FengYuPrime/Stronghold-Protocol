@@ -89,6 +89,8 @@ export function makeMatch(o = {}) {
     // a gameplay-plugin room (DESIGN §32.6): host rehearsal stays off there (match/rehearsal.js requireCs)
     cs: o.cs,
     vs: o.vs,
+    // 调试模式 (SP_DEV=1, Match.devGold): the dev-only intents (g.devGold / g.devLp / g.devGive) work — off by default
+    devGold: o.devGold === true,
     requireCs: o.requireCs,
   });
   const m = h.m;
@@ -185,6 +187,8 @@ function legacyInvariants(m) {
     }
     const chessUids = new Set();
     const diyHeld = new Map();
+    // the player's data view (0.2.0 自选: its slotted slots — an official one or a dev-only one of g.devGive — are operators)
+    const pgd = ps.gd || m.gd;
     const all = [...ps.board.values(), ...ps.hand.filter(Boolean), ...ps.temp.filter(Boolean)];
     for (const p of all) if (p.kind === 'chess') chessUids.add(p.uid);
     let deployed = 0;
@@ -192,7 +196,6 @@ function legacyInvariants(m) {
     for (const [k, p] of ps.board) {
       const [r, c] = k.split(',').map(Number);
       assert.ok(r >= FIELD.r0 && r <= FIELD.r1 && c >= FIELD.c0 && c <= FIELD.c1, `piece outside the board ${k}`);
-      const pgd = ps.gd || m.gd; // the player's data view (0.2.0 自选: its summons are data/backups.json tokens)
       const rec = p.kind === 'token' ? pgd.token(p.id) : pgd.chess(p.id);
       assert.ok(rec, `unknown board piece ${p.id}`);
       const cls = p.kind === 'chess' ? placeClass(ps, rec) : positionClass(rec);
@@ -205,12 +208,13 @@ function legacyInvariants(m) {
     for (const p of all) {
       note(p);
       if (p.kind === 'chess') {
-        const rec = m.gd.chess(p.id);
+        // the player's data view: its slotted 自选 slots (an official one, or a dev-only one of g.devGive) are operators
+        const rec = pgd.chess(p.id);
         assert.ok(rec, `unknown chess ${p.id}`);
         assert.ok(Array.isArray(p.items) && p.items.length <= m.gd.equipPerChess, `${p.id} carries ${p.items && p.items.length} items`);
         for (const it of p.items) { note(it); assert.equal(it.kind, 'item'); assert.ok(m.gd.item(it.id), `unknown item ${it.id}`); }
         assert.ok(Number.isInteger(p.poolCopies) && p.poolCopies >= 0);
-        const base = m.gd.baseIdOf(p.id);
+        const base = pgd.baseIdOf(p.id);
         // a 自选 piece's copies are its player's own stock (0.2.0, server/match/player/diy.js)
         const tally = ps.diyStock && ps.diyStock.has(base) ? diyHeld : held;
         tally.set(base, (tally.get(base) || 0) + p.poolCopies);
@@ -223,10 +227,10 @@ function legacyInvariants(m) {
     }
     // merges are immediate: never 3 normal copies (风丸 2) of one chess owned at once
     const counts = new Map();
-    for (const p of all) if (p.kind === 'chess' && !m.gd.isGolden(p.id)) { const b = m.gd.baseIdOf(p.id); counts.set(b, (counts.get(b) || 0) + 1); }
+    for (const p of all) if (p.kind === 'chess' && !pgd.isGolden(p.id)) { const b = pgd.baseIdOf(p.id); counts.set(b, (counts.get(b) || 0) + 1); }
     for (const [b, n] of counts) {
-      const need = m.gd.mergeCount(b);
-      if (need > 1 && m.gd.goldenIdOf(b)) assert.ok(n < need, `${ps.playerId} owns ${n} copies of ${b} (merge ${need})`);
+      const need = pgd.mergeCount(b);
+      if (need > 1 && pgd.goldenIdOf(b)) assert.ok(n < need, `${ps.playerId} owns ${n} copies of ${b} (merge ${need})`);
     }
     for (const [base, e] of ps.diyStock ? ps.diyStock.entries : []) {
       assert.equal(e.left + (diyHeld.get(base) || 0), e.cap, `${ps.playerId} 自选 stock ${base}: left ${e.left} + held ${diyHeld.get(base) || 0} != cap ${e.cap}`);

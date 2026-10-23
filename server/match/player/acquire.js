@@ -263,8 +263,10 @@ export class PlayerAcquire {
    * `displayed` (a shop slot or a reward offer already on screen, #624): skip the stock refusal and, once the piece
    * is actually kept, record the copies that did not fit (`need` minus `left` before the gain). A failed stow or
    * merge records nothing. Fixed gift families stay unlimited without a debt entry. Every other grant still refuses.
+   * `bypassStock` (the dev-only g.devGive, player/dev.js): skip the stock refusal without recording a debt — the
+   * debugger hands out what a normal grant would refuse. Nothing else changes.
    */
-  acquireItem(itemId, { source = 'grant', toTemp = false, silent = false, deferMerge = false, requirePool = true, displayed = false } = {}) {
+  acquireItem(itemId, { source = 'grant', toTemp = false, silent = false, deferMerge = false, requirePool = true, displayed = false, bypassStock = false } = {}) {
     const rec = this.gd.item(itemId);
     if (!rec) return null;
     // Only the fixed operator-gift families can overdraw. Several unrelated strategy grants also pass
@@ -273,7 +275,7 @@ export class PlayerAcquire {
     const pool = this.m.itemPool;
     const leftBefore = pool.left(itemId);
     const need = pool.need(itemId);
-    if (!unlimitedGift && !displayed && !pool.canGain(itemId)) {
+    if (!unlimitedGift && !displayed && !bypassStock && !pool.canGain(itemId)) {
       this.m.toast(this, 'warn', '装备库存不足，未获得该装备');
       return null;
     }

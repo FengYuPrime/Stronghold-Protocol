@@ -516,6 +516,19 @@ export const C2S = {
   // 调试 (SP_DEV=1)：扣自己的 LP（默认 1），把一局快速推到结算 —— 验收战后统计/曲线时不用真打完四回合。
   // 与 g.devGold 同一开关；服务端没开 dev 模式时直接拒（server/match/match/intents.js），按钮也不会出现。
   'g.devLp': { n: (v) => isInt(v, 1, 99), $optional: ['n'] },
+  // 调试 (SP_DEV=1)：任意干员 / 任意装备 / 任意自选（含替补）干员直接发给自己（调试器面板，ui/devGive.js）。与
+  // g.devGold 同一开关；服务端没开 dev 模式时直接拒（server/match/match/intents.js），客户端也拿不到这个入口
+  // （m.private.dev）。id = 棋子的 chessId（普通或精锐）、道具 id，或 kind 'diy' 时的 charId
+  // （data/backups.json `diy.operators`，走自选编队那条路，server/match/player/dev.js devGiveDiy）；
+  // tier / skillIndex / moduleId 可省（缺省 = 默认星级 / 技能 / 模组），给了就必须与数据一致，否则 BAD_TARGET。
+  'g.devGive': {
+    kind: (v) => v === 'chess' || v === 'item' || v === 'diy',
+    id: isId,
+    tier: (v) => isInt(v, 1, 6),
+    skillIndex: (v) => isInt(v, 0, LOADOUT_LIMITS.skillIndex),
+    moduleId: isId,
+    $optional: ['tier', 'skillIndex', 'moduleId'],
+  },
   'g.emote': { id: (v) => EMOTES.includes(v) },
   // playerId: the player tapped in the team panel (a 联防 / boss pair field shows two) — what an eliminated viewer or a
   // spectator seat follows from then on (Match.watchPref; community report of 2026-10-06, item 56)

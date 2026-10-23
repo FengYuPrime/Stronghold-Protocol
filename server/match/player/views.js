@@ -62,6 +62,14 @@ export class PlayerViews {
     for (const { r, c, piece } of boardOrder(this.board)) board.push(this.pieceView(piece, [r, c]));
     // a boss round's prep: the partner's board on its half of the boss field (Match.bossMateView, item 51)
     const bossMate = typeof this.m.bossMateView === 'function' ? this.m.bossMateView(this) : null;
+    // 调试 (g.devGive, SP_DEV=1): the composed records of this player's dev-only 自选 slots — this view is per player,
+    // never broadcast (the ids are not in data/chess.json, see public/js/data.js setChessOverlay). Sent only when the set
+    // changed (a new dev slot), so an ordinary private push stays small; a page that missed it composes the records
+    // itself from m.private.diy (public/js/ui/devChess.js).
+    const devChess = typeof this.devChessRecords === 'function' ? this.devChessRecords() : null;
+    const devChessKey = devChess ? Object.keys(devChess).join(',') : '';
+    const devChessSend = devChess && this._devChessKey !== devChessKey ? devChess : null;
+    if (devChessSend) this._devChessKey = devChessKey;
     return {
       t: 'm.private',
       playerId: this.playerId,
@@ -118,6 +126,9 @@ export class PlayerViews {
       // switched off)
       diy: this.diy,
       diyBanned: this.diyBanned,
+      // 调试 (g.devGive, SP_DEV=1): `{ [devId]: composed record }` — only THIS player's client gets it (the board, bench
+      // cards and detail card look it up through public/js/data.js setChessOverlay). Absent without a dev slot.
+      ...(devChessSend ? { devChess: devChessSend } : null),
       // 最终攻势 / 隐秘核心 prep (community report of 2026-10-06, item 51): `{ playerId, side, units }` — the pair partner's
       // board pieces as UnitInfo on its half of the boss field (mirrored on the right half, as the battle places them);
       // the own prep view draws them beside the own half, read-only. Absent otherwise.

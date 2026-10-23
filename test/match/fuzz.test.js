@@ -38,6 +38,11 @@ function randomIntent(rng, m, ps) {
     case 'g.watch': return { t, fieldId: rng.pick(['n:p_0', 'n:p_1', 'n:ai_0', 'u', 'b1', 'b2', 'zz', '']) };
     case 'g.autoplay': return { t, on: rng() < 0.05 };
     case 'g.pause': return { t, on: rng() < 0.5 };
+    // 调试 (SP_DEV=1): valid-shaped only — a match without the dev switch refuses it with BAD_MSG (the reply assertion
+    // below still holds). The id is a real one so the dev-gated path can be exercised by a dev match too.
+    case 'g.devGive': return rng() < 0.5
+      ? { t, kind: 'chess', id: rng.pick(Object.keys(DATA.chess)) }
+      : { t, kind: 'item', id: rng.pick(Object.keys(DATA.items)) };
     default: return { t };
   }
 }

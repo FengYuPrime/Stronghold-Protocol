@@ -117,6 +117,8 @@
 //   round.js      the round lifecycle the match calls (startRound, endPrep, eliminate, recompute, bond views) and
 //                 battleInput
 //   views.js      pieceView, effectsView, m.private (privateView)
+//   dev.js        the dev-only gain g.devGive (SP_DEV=1): devGive, devGiveChess, devGiveItem — through
+//                 acquireChess / acquireItem
 //   diy.js        自选编队: the picks (setDiy), the player's data view, the DIY stock (initDiyStock, poolOf), the shop's
 //                 DIY draws (diyRollEntries) and the reward / grant draws (diyStockEntries), the pick of a piece (diyPickOf)
 //   common.js     HAND_SIZE, TEMP_SIZE, MAX_OFFER_SLOTS, OK, fail
@@ -133,6 +135,7 @@ import { PlayerItems } from './player/items.js';
 import { PlayerPrep } from './player/prep.js';
 import { PlayerRound } from './player/round.js';
 import { PlayerViews } from './player/views.js';
+import { PlayerDev } from './player/dev.js';
 import { PlayerDiy, DiyStock } from './player/diy.js';
 
 export class PlayerState {
@@ -253,7 +256,7 @@ export class PlayerState {
 }
 
 // the method modules, in this order (a name defined twice is an error, never a silent override)
-for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDiy]) {
+for (const part of [PlayerBasics, PlayerPieces, PlayerAcquire, PlayerEconomy, PlayerPlacement, PlayerItems, PlayerPrep, PlayerRound, PlayerViews, PlayerDev, PlayerDiy]) {
   for (const key of Reflect.ownKeys(part.prototype)) {
     if (key === 'constructor') continue;
     if (Object.prototype.hasOwnProperty.call(PlayerState.prototype, key)) throw new Error(`PlayerState.${String(key)} is defined twice`);
