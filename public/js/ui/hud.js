@@ -347,6 +347,18 @@ export function PauseButton({ paused, busy = false, onToggle }) {
 }
 
 /**
+ * 调试 (SP_DEV=1, `g.devEnemyHp`): the enemy-HP multiplier ladder the top bar's dev button cycles —
+ * ×1 (off) → ×5 → ×20 → ×100 → ×1. The value shown is the one the server reports (`m.private.devEnemyHp`), never a
+ * local guess: a click sends the next step as `g.devEnemyHp { mul }` and the button follows the reply.
+ */
+export const DEV_ENEMY_HP_STEPS = [1, 5, 20, 100];
+/** The ladder step after `cur` — unknown / missing values start the cycle at ×5 (never a no-op click on ×1). */
+export function nextDevEnemyHp(cur) {
+  const i = DEV_ENEMY_HP_STEPS.indexOf(Number(cur));
+  return DEV_ENEMY_HP_STEPS[(i < 0 ? 1 : i + 1) % DEV_ENEMY_HP_STEPS.length];
+}
+
+/**
  * Top bar.
  * @param {{ pub:any, priv:any, conn:any, hud:any, total:number|null, drawer:string|null, onExit:Function, onDrawer:(tab:string)=>void,
  *   onReady:(r:boolean)=>void, readyBusy?:boolean, readyCount?:number, playerCount?:number,
@@ -367,7 +379,8 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  */
 export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false,
-  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, stats = null, viewerOwner = false, onDevGold = null, onDevLp = null, onDevGive = null }) {
+  spectators = null, myId = null, isHost = false, onRemoveSpectator = null, room = null, stats = null, viewerOwner = false, onDevGold = null, onDevLp = null, onDevGive = null,
+  onDevEnemyHp = null }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
   const lp = boss && Number.isFinite(pub?.teamLp) ? pub.teamLp : Number.isFinite(priv?.lp) ? priv.lp : null;
@@ -403,6 +416,9 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         ${priv?.dev && onDevLp ? html`<button type="button" class="gtop__dev" data-testid="dev-lp" title="dev: -1 LP (Shift: -99)" onClick=${(e) => onDevLp(e && e.shiftKey ? 99 : 1)}>-1 LP</button>` : null}
         ${/* 调试 (SP_DEV=1)：打开调试面板，任意干员 / 任意装备直接加入自己（ui/devGive.js，指令 g.devGive）。 */ null}
         ${priv?.dev && onDevGive ? html`<button type="button" class="gtop__dev" data-testid="dev-give" title=${t('开发调试：任意干员 / 装备加入自己')} onClick=${onDevGive}>${t('调试')}</button>` : null}
+        ${/* 调试 (SP_DEV=1)：敌人血量倍率 ×1 → ×5 → ×20 → ×100（指令 g.devEnemyHp）—— 只乘在之后新生成的敌人上，
+             用来测持续伤害 / 元素这类需要「耐打靶子」的效果。标签是服务端回的当前档位。 */ null}
+        ${priv?.dev && onDevEnemyHp ? html`<button type="button" class="gtop__dev" data-testid="dev-enemy-hp" title=${t('开发调试：敌人生命倍率（新生成的敌人）')} onClick=${() => onDevEnemyHp(nextDevEnemyHp(priv.devEnemyHp))}>${`×${Number.isFinite(priv.devEnemyHp) ? priv.devEnemyHp : 1}`}</button>` : null}
         <${UnofficialMark} room=${room} compact=${true} class="gtop__mod" />
       </div>
     </div>

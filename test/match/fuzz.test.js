@@ -43,6 +43,8 @@ function randomIntent(rng, m, ps) {
     case 'g.devGive': return rng() < 0.5
       ? { t, kind: 'chess', id: rng.pick(Object.keys(DATA.chess)) }
       : { t, kind: 'item', id: rng.pick(Object.keys(DATA.items)) };
+    // 调试 (SP_DEV=1): the enemy-HP multiplier (a dev match scales its next enemies; without the switch ⇒ BAD_MSG)
+    case 'g.devEnemyHp': return { t, mul: rng.pick([1, 5, 20, 100]) };
     default: return { t };
   }
 }

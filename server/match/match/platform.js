@@ -257,6 +257,23 @@ export class MatchPlatform {
     return { ok: true, lp: 0, eliminated: true };
   }
 
+  /**
+   * 调试 (SP_DEV=1, `g.devEnemyHp`): 敌人血量倍率 —— 之后**新生成的**敌人最大生命 ×mul（1 = 恢复），方便测持续伤害 /
+   * 元素这类需要「耐打靶子」的效果。倍率只是折进战斗构建时那批 spawn 的 `mods.hpMul`（match/combat.js
+   * _devEnemySpawns），所以：正在跑的战斗不受影响，下一场 / 下一回合起按新倍率生成；已经站在场上的敌人不动
+   * （不改当前生命，行为简单可预期）；领袖的 HP 来自服务器共享池，不吃这个倍率。
+   * 倍率是整局共享的（dev 局里所有人看到同一个值），改完给每个存活的人类推一份 m.private（devEnemyHp）。
+   * 普通启动里这条意图不存在（server/match/Match.js 的 devGold 开关）。
+   * @param {number} [mul] the enemy max-HP multiplier (1..1000; 1 = off)
+   * @returns {{ ok: true, mul: number } | { error: string, detail?: string }}
+   */
+  devEnemyHp(mul = 1) {
+    if (!Number.isInteger(mul) || mul < 1 || mul > 1000) return fail(ERR.BAD_MSG, `bad mul ${String(mul).slice(0, 16)}`);
+    this.devEnemyHpMul = mul;
+    for (const ps of this.alivePlayers()) ps.dirty();
+    return { ok: true, mul };
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;

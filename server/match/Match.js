@@ -319,6 +319,14 @@ export class Match {
      * the button exists there.
      */
     this.devGold = opts.devGold === true;
+    /**
+     * 调试 (SP_DEV=1, `g.devEnemyHp`): the enemy-HP multiplier of this match — 1 by default, so a normal match is
+     * untouched. It is folded into the spawn list of every battle this match builds AFTER the change
+     * (match/combat.js _devEnemySpawns → spawns' mods.hpMul), i.e. it scales the enemies that spawn next, never the
+     * ones already on a running field; 1 = off. The dev-only intent that sets it (match/platform.js devEnemyHp) is
+     * refused unless devGold is on, and the client shows the value as the「×N」dev button (m.private.devEnemyHp).
+     */
+    this.devEnemyHpMul = 1;
     this.verifyMode = parseVerify(opts.verify ?? env('SP_VERIFY'));
     /** wall-clock ms per slice of a server-run normal / 联防 field (virtual time: at once) */
     this.headlessSliceMs = Number.isFinite(opts.headlessSliceMs) && opts.headlessSliceMs > 0 ? opts.headlessSliceMs : this.sched.virtual ? Infinity : HEADLESS_SLICE_MS;

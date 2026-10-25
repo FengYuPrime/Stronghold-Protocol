@@ -14,7 +14,9 @@ import { previewPlayer } from '../preview.js';
 export class MatchCombat {
   /** Construct a battle; a constructor failure yields a finished stand-in (clean result) and is logged. */
   newBattle(opts, { preview = false } = {}) {
+    const spawns = this._devEnemySpawns(opts.spawns);
     const full = { data: this.ds, content: this.battleContent, logger: this.log, ...opts,
+      ...(spawns ? { spawns } : null),
       ...(preview ? { logger: {}, quiet: true } : {}) };
     try {
       return new this.BattleClass(full);
@@ -22,6 +24,27 @@ export class MatchCombat {
       if (!preview) this.reportError(`battle ${opts.fieldId} construct`, e);
       return new DeadBattle(full, 'forced');
     }
+  }
+
+  /**
+   * 调试 (g.devEnemyHp, SP_DEV=1): fold this match's enemy-HP multiplier into a battle's spawn list — every spawn's
+   * `mods.hpMul` × `devEnemyHpMul`, which is the multiplier spawnEnemy already applies to an enemy's max HP
+   * (server/sim/battle/spawns.js), so the sim needs no knowledge of dev mode. Built with the multiplier at 1 (every
+   * normal match) a battle gets `null` and its spawn list is passed through untouched — no copy, no change.
+   * Scope: the enemies this battle's own spawn list generates (the round's waves, a 联防 re-entry, a bounty's, the
+   * leader's escorts / parts — the leader itself keeps the shared server pool's HP). Already-fielded enemies and the
+   * runtime spawns content makes for itself are not scaled, so a change applies from the next battle on.
+   * @param {any} list the spawn list of the battle options @returns {any[]|null}
+   */
+  _devEnemySpawns(list) {
+    const mul = this.devGold ? this.devEnemyHpMul : 1;
+    if (!(mul > 1) || !Array.isArray(list) || !list.length) return null;
+    return list.map((s) => {
+      if (!s || typeof s !== 'object') return s;
+      const mods = s.mods && typeof s.mods === 'object' ? s.mods : {};
+      const hp = Number(mods.hpMul);
+      return { ...s, mods: { ...mods, hpMul: (Number.isFinite(hp) && hp >= 0 ? hp : 1) * mul } };
+    });
   }
 
   /**

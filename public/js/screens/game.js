@@ -898,6 +898,13 @@ function MatchScreen() {
   // g.devGive 直接加入自己（server/match/player/dev.js，走正常的获得路径）。服务端没开 dev 时这条指令被拒
   // （ERR.BAD_MSG）；DEV_NO_KIT / DEV_NO_SLOT 这类专门错误码经 describeError 显示成具体原因（ERR_TEXT）。
   const devGiveOpenHandler = useCallback(() => setDevGiveOpen(true), []);
+  // 调试 (SP_DEV=1)：顶栏那个「×N」敌人血量倍率按钮（server/match/match/platform.js devEnemyHp）—— 点一下走下一档
+  // （×1 → ×5 → ×20 → ×100，ui/hud.js DEV_ENEMY_HP_STEPS），服务端只把倍率乘在之后新生成的敌人最大生命上
+  // （match/combat.js _devEnemySpawns）。普通启动里 priv.devEnemyHp 不存在，按钮与这里都不会出现。
+  const devEnemyHpHandler = useCallback((mul) => {
+    net.request('g.devEnemyHp', { mul })
+      .catch((err) => toast(t('调试失败：{code}', { code: String((err && err.code) || err) }), 'warn'));
+  }, []);
   const devGiveHandler = useCallback((fields) => {
     if (!fields) return;
     setDevGiveBusy(true);
@@ -1627,7 +1634,7 @@ function MatchScreen() {
         spectators=${specFacts.list} myId=${myId} isHost=${specFacts.isHost} onRemoveSpectator=${removeSpectator} room=${modRoom}
         stats=${serverStats}
         viewerOwner=${viewerOwner}
-        onDevGold=${devGoldHandler} onDevLp=${devLpHandler} onDevGive=${devGiveOpenHandler} />
+        onDevGold=${devGoldHandler} onDevLp=${devLpHandler} onDevGive=${devGiveOpenHandler} onDevEnemyHp=${devEnemyHpHandler} />
       ${/* 调试 (SP_DEV=1)：任意干员 / 装备 / 自选（替补）干员加入自己（ui/devGive.js）。非 dev 局 priv.dev 不存在，面板永不出现。 */ null}
       ${priv?.dev ? html`<${DevGiveDialog} open=${devGiveOpen} chess=${data.get('chess')} items=${data.get('items')}
         backups=${data.get('backups')} busy=${devGiveBusy} onGive=${devGiveHandler} onClose=${() => setDevGiveOpen(false)} />` : null}

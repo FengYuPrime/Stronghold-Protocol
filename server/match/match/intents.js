@@ -45,6 +45,9 @@ export class MatchIntents {
       case 'g.devLp': return this.devGold ? this.devLp(ps, msg.n) : fail(ERR.BAD_MSG, 'dev mode is off');
       // 调试 (SP_DEV=1)：任意干员 / 任意装备直接加入自己（player/dev.js devGive，走正常的获得路径）。同样受开关约束。
       case 'g.devGive': return this.devGold ? ps.devGive(msg) : fail(ERR.BAD_MSG, 'dev mode is off');
+      // 调试 (SP_DEV=1)：敌人血量倍率 —— 之后新生成的敌人最大生命 ×mul（1 = 恢复），用来测持续伤害 / 元素这类需要
+      // 「耐打靶子」的效果。同样受开关约束。
+      case 'g.devEnemyHp': return this.devGold ? this.devEnemyHp(msg.mul) : fail(ERR.BAD_MSG, 'dev mode is off');
       case 'g.emote': return this.emote(ps, msg.id);
       // playerId: the player tapped (a shared field names two) — the watch preference (item 56)
       case 'g.watch': return this.watch(ps, msg.fieldId, msg.playerId ?? null);

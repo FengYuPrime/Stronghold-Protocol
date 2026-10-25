@@ -79,6 +79,8 @@ export class PlayerViews {
       funds: this.funds,
       // 调试 (SP_DEV=1)：只在这时下发，界面才显示「+999 资金」按钮（server/match/player/economy.js devGold）
       ...(this.m.devGold === true ? { dev: true } : null),
+      // 调试 (SP_DEV=1, g.devEnemyHp)：敌人血量倍率（界面那个「×N」按钮的当前档位；1 = 关）。只在 dev 局下发。
+      ...(this.m.devGold === true ? { devEnemyHp: this.m.devEnemyHpMul } : null),
       bandId: this.bandId,
       ready: this.ready,
       canReady: this.alive && this.tempEmpty && !this.personalChoice && this.m.phase === PHASE.PREP,

@@ -1269,6 +1269,7 @@
   "调试": "Debug",
   "开发调试：任意干员 / 装备加入自己": "Developer debug: give yourself any operator / equipment",
   "调试：任意干员 / 装备": "Debug: any operator / equipment",
+  "开发调试：敌人生命倍率（新生成的敌人）": "Developer debug: enemy HP multiplier (enemies spawned from now on)",
   "搜索名称或 id": "Search name or id",
   "只在开发模式（SP_DEV=1）下可用：选中的干员 / 装备会直接加入你的整备区。": "Dev mode only (SP_DEV=1): the chosen operator / equipment joins your bench directly.",
   "加入": "Add",

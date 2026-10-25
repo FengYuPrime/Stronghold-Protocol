@@ -529,6 +529,11 @@ export const C2S = {
     moduleId: isId,
     $optional: ['tier', 'skillIndex', 'moduleId'],
   },
+  // 调试 (SP_DEV=1)：敌人血量倍率（调试用「耐打靶子」，测持续伤害 / 元素这类效果）—— `mul` 乘在之后**新生成的**
+  // 敌人的最大生命上（server/match/match/combat.js _devEnemySpawns 折进 spawn 的 mods.hpMul），1 = 关掉该倍率。
+  // 与 g.devGold 同一开关；服务端没开 dev 模式时直接拒（server/match/match/intents.js），按钮也不会出现
+  // （m.private.dev / m.private.devEnemyHp）。
+  'g.devEnemyHp': { mul: (v) => isInt(v, 1, 1000) },
   'g.emote': { id: (v) => EMOTES.includes(v) },
   // playerId: the player tapped in the team panel (a 联防 / boss pair field shows two) — what an eliminated viewer or a
   // spectator seat follows from then on (Match.watchPref; community report of 2026-10-06, item 56)
