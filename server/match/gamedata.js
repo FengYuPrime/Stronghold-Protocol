@@ -12,6 +12,7 @@
 // that still carries them is ignored).
 
 import { getConfig, getMode } from '../data.js';
+import { devBossRound } from '../http/config.js';
 import { isShopItem } from '../sim/simdata.js';
 import { mergeData } from '../../shared/plugins/dataUtils.js';
 import { standInRecord } from '../../shared/standIn.js';
@@ -99,6 +100,14 @@ export class GameData {
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
     this.mode = getMode(modeId, this.raw) || {};
+    /**
+     * fork 的调试开关 (server/http/config.js devBossRound): a dev match's boss-round number from SP_DEV_BOSS_ROUND, or
+     * null in a normal boot / with a bad value. Read once per match here, so a running match keeps its value. Only a
+     * round the mode really has counts (≤ lastRound): ahead of the table there is no wave config, and the hidden round
+     * (lastRound + 1) must stay after the boss — a value beyond that would misplace it.
+     */
+    const devBoss = devBossRound();
+    this._devBossRound = devBoss != null && devBoss <= this.lastRound ? devBoss : null;
     // Mode-level globals inherit field by field; the vanilla mode never changes its config object.
     const overrides = Object.fromEntries(Object.keys(this.config).filter(k => k !== 'modes' && Object.hasOwn(this.mode, k)).map(k => [k, this.mode[k]]));
     if (Object.keys(overrides).length) this.config = mergeData(this.config, overrides);
@@ -358,11 +367,22 @@ export class GameData {
     if (Number.isInteger(this.mode.lastRound) && this.mode.lastRound > 0) return this.mode.lastRound;
     return this.modeId === 'mode_single_funny' ? 9 : 14;
   }
-  get bossRound() { return Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : this.lastRound; }
+  /** The mode's own boss round (data/config.json) — never the dev override below. */
+  get dataBossRound() { return Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : this.lastRound; }
+  get bossRound() {
+    // fork 的调试开关 (SP_DEV_BOSS_ROUND, server/http/config.js devBossRound): 只在 dev 模式（--dev / SP_DEV=1）且值是
+    // 正整数时才返回它，让 Final Assault 提前到来。正式局永不生效：普通启动里 _devBossRound 恒为 null，永远走数据里的
+    // bossRound；未设、非法值（0、负数、非数字）也同样走原逻辑。
+    return this._devBossRound ?? this.dataBossRound;
+  }
   get hiddenRound() { return Number.isInteger(this.mode.hiddenRound) && this.mode.hiddenRound > 0 ? this.mode.hiddenRound : null; }
   get maxShopLevel() { return posIntOr(this.mode.maxShopLevel, DEFAULTS.maxShopLevel); }
 
   roundCfg(r) {
+    // 调试覆盖只挪「回合号」，不挪「关卡数据」：被覆盖的 boss 回合仍读模式里真正的 boss 回合配置（bossTemplates /
+    // levelMaxPlayTime），否则这一轮会拿到一张没有 boss、没有倒计时的空地图。只在 dev 覆盖生效时改变 r 的读取，
+    // 其余回合和正式局完全不变（hiddenRound 不受影响：它照旧读自己那一轮的配置）。
+    if (this._devBossRound != null && r === this._devBossRound) r = this.dataBossRound;
     const rounds = this.mode.rounds;
     return rounds && typeof rounds === 'object' && rounds[String(r)] && typeof rounds[String(r)] === 'object' ? rounds[String(r)] : null;
   }

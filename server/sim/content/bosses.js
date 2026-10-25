@@ -270,8 +270,10 @@ function summonMods(b, hpRatio = null) {
 export function install(battle) {
   ensureInstalled(battle);
   battle.on('enemySpawn', ({ enemy }) => onSpawn(battle, enemy), { priority: 90 });
-  // "最终攻势中，敌方领袖不会受到侵蚀损伤" (PRTS 卫戍协议：盟约/PRTS盟约记录 规则; research 06 §10.1): leaders ignore erosion gauge damage
-  battle.on('elementHit', (c) => { if (c.target && c.target.isBoss && c.dmg.element === 'erosion') c.dmg.cancel = true; }, { priority: 100 });
+  // Fork deviation: the official mode tips say the Final Assault's leaders take no 侵蚀 ("最终攻势中，敌方领袖不会受到侵蚀损伤",
+  // PRTS 专属贴士); this fork deliberately lets leaders take erosion gauge damage and bursts like any other enemy, so erosion
+  // content stays testable / playable in boss fights. Other leader immunities (data `immune`: stun, silence, …) are unchanged.
+  // DESIGN §29 (community corrections) records the deviation.
 }
 export function registerMeta() {}
 

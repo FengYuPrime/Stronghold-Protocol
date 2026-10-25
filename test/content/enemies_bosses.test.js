@@ -2405,15 +2405,24 @@ test(`${nm('enemy_10144_xdelk_2')}: 角力对决 — blocked ⇒ ${skb('enemy_10
 // ---------------------------------------------------------------------------------------------------------------
 // leaders: shared rules
 
-test('最终攻势: leaders take no 侵蚀 (erosion) damage; other enemies do', () => {
-  const h = bossArena();
+// Fork deviation: the official tips say the Final Assault's leaders take no 侵蚀 ("最终攻势中，敌方领袖不会受到侵蚀损伤");
+// this fork lets them take it like any other enemy (DESIGN §29, server/sim/content/bosses.js install).
+test('最终攻势: leaders take 侵蚀 (erosion) gauge damage and burst like other enemies (fork deviation)', () => {
+  const h = bossArena({ hooks: ['elementBurst'] });
   h.step();
   const e = put(h, 'enemy_9021_acduml', [3, 10], { tag: 'boss' });
   const o = put(h, 'enemy_1007_slime', [3, 8]);
-  assert.equal(h.b.dealDamage(null, e, { type: 'element', element: 'erosion', amount: 5000 }), 0);
-  assert.equal(e.elem.erosion, 0);
-  assert.ok(h.b.dealDamage(null, e, { type: 'element', element: 'burn', amount: 100 }) > 0);
-  assert.ok(h.b.dealDamage(null, o, { type: 'element', element: 'erosion', amount: 100 }) > 0);
+  assert.equal(e.gaugeMax, 2000, 'a leader gauge holds 2000');
+  assert.ok(h.b.dealDamage(null, e, { type: 'element', element: 'erosion', amount: 500 }) > 0);
+  approx(e.elem.erosion, 500, 1e-9, 'the leader gauge fills');
+  assert.ok(h.b.dealDamage(null, e, { type: 'element', element: 'erosion', amount: 1500 }) > 0);
+  assert.equal(e.elem.erosion, 2000, 'full gauge (held during the 8 s cooldown)');
+  const bursts = h.hooksOf('elementBurst').filter((c) => c.target === e);
+  assert.equal(bursts.length, 1, 'exactly one burst');
+  assert.equal(bursts[0].element, 'erosion');
+  assert.equal(e.findBuff('erosionDown').stacks, 1, 'enemy erosion burst: permanent DEF −120');
+  assert.ok(h.b.dealDamage(null, e, { type: 'element', element: 'burn', amount: 100 }) === 0, 'every gauge is locked by the burst');
+  assert.ok(h.b.dealDamage(null, o, { type: 'element', element: 'erosion', amount: 100 }) > 0, 'other enemies unchanged');
 });
 
 test('template overrides of talents/skills are honoured (卢西恩 evade 0.2 in act2autochess_h07_05)', () => {

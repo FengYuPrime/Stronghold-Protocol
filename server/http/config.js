@@ -8,6 +8,8 @@
 //     running matches at once (a low-spec server's cap; the hall, spectating and AI seats are never counted);
 //   * SP_OWNER_TOKEN → net.js `ownerToken`: a page that carries it in its URL (`/?owner=…`) plays as the server owner —
 //     never refused by that cap and never counted against it; unset/empty = nobody has the privilege;
+//   * SP_DEV_BOSS_ROUND (dev only: `--dev` / SP_DEV=1) → match/gamedata.js `bossRound`: the dev match's Final Assault
+//     comes on that round (devBossRound); unset, not dev, or not a positive integer = the mode's own boss round;
 //   * SP_ASSET_INDEX=0 (or the `assetIndex: false` option) → no content-hash index: plain asset URLs, size-mtime ETags
 //     (assetIndex.js); the index of the default public/ persists in .cache/asset-hashes.json;
 //   * the served directories (public/, data/, shared/, the content packs' packs/ and the plugins' plugins/ of this
@@ -163,7 +165,23 @@ export function isDev(argv = process.argv) {
   return Array.isArray(argv) && argv.includes('--dev');
 }
 
-/** TRUST_PROXY env → net.js trustProxy ('auto' unless explicitly on/off). @param {string | undefined} v */
+/**
+ * fork 的调试开关 (env `SP_DEV_BOSS_ROUND`): the round the Final Assault is played on, pulled forward for a dev match.
+ * DEV ONLY — read only while isDev() (`--dev` or SP_DEV=1), so a normal boot never sees it; unset, not dev, or a value
+ * that is not a positive integer (0, negative, 'abc', '2x') → null, i.e. the mode's own boss round (no change).
+ * @param {string[]} [argv] defaults to process.argv
+ * @returns {number | null}
+ */
+export function devBossRound(argv = process.argv) {
+  if (!isDev(argv)) return null;
+  const s = String(process.env.SP_DEV_BOSS_ROUND ?? '').trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * TRUST_PROXY env → net.js trustProxy ('auto' unless explicitly on/off). @param {string | undefined} v */
 export function parseTrustProxy(v) {
   const s = String(v ?? '').trim().toLowerCase();
   if (['1', 'true', 'yes', 'on', 'always'].includes(s)) return true;

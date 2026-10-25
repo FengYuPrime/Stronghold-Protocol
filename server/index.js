@@ -38,7 +38,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { getData, loadData } from './data.js';
-import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy, assetIndexOptionsFrom } from './http/config.js';
+import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy, assetIndexOptionsFrom, devBossRound } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
 import { siteCsp } from './http/csp.js';
 import { DATA_SHIM_JS, createStaticHandler } from './http/static.js';
@@ -100,6 +100,9 @@ export {
 export async function startServer(opts = {}) {
   const { port, host } = listenAddress(opts);
   const log = opts.log || makeLogger(!!opts.quiet);
+  // 调试开关 (SP_DEV_BOSS_ROUND)：只在 dev 起动时读一次，打一行日志方便确认 boss 第几回合来；正式启动没有这一行
+  const devBoss = devBossRound();
+  if (devBoss != null) log.info(`[dev] bossRound overridden to ${devBoss} (SP_DEV_BOSS_ROUND)`);
   const { publicDir, dataDir, sharedDir, packsDir, pluginsDir } = serveDirs(opts);
   const simDir = path.join(ROOT, 'server', 'sim');
 
